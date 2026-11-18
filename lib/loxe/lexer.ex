@@ -14,6 +14,9 @@ defmodule Loxe.Lexer do
     * `span` is the token's byte range in the source, as a `Loxe.Span`.
       `end` is exclusive.
 
+  The last token is always `:eof`, with an empty span at the end of the
+  source.
+
   ## Lexical rules
 
     * Spaces, tabs, carriage returns and newlines are skipped.
@@ -115,6 +118,7 @@ defmodule Loxe.Lexer do
           | :this
           | :var
           | :while
+          | :eof
 
   @type token ::
           {tokenkind(), nil, Span.t()}
@@ -125,8 +129,8 @@ defmodule Loxe.Lexer do
   @doc """
   Lexes `src` into tokens. Every span gets `source_id`.
 
-  Returns `{:ok, tokens}` in source order, or `{:error, error}` for the
-  first error. There is no end-of-file token.
+  Returns `{:ok, tokens}` in source order, ending with an `:eof` token, or
+  `{:error, error}` for the first error.
 
   ## Examples
 
@@ -137,7 +141,8 @@ defmodule Loxe.Lexer do
          {:ident, "x", %Loxe.Span{source_id: 0, start: 4, end: 5}},
          {:equal, nil, %Loxe.Span{source_id: 0, start: 6, end: 7}},
          {:number, 1.0, %Loxe.Span{source_id: 0, start: 8, end: 9}},
-         {:semicolon, nil, %Loxe.Span{source_id: 0, start: 9, end: 10}}
+         {:semicolon, nil, %Loxe.Span{source_id: 0, start: 9, end: 10}},
+         {:eof, nil, %Loxe.Span{source_id: 0, start: 10, end: 10}}
        ]}
 
       iex> Loxe.Lexer.lex(~s("hi), 0)
@@ -157,7 +162,10 @@ defmodule Loxe.Lexer do
 
   defguardp ident_continue?(c) when ident_start?(c) or c in ?0..?9
 
-  defp lex(<<>>, acc, _ctx), do: {:ok, Enum.reverse(acc)}
+  defp lex(<<>>, acc, ctx) do
+    eof = token(:eof, nil, "", "", ctx)
+    {:ok, Enum.reverse([eof | acc])}
+  end
 
   defp lex(<<c, rest::binary>>, acc, ctx) when c in ~c" \t\r\n", do: lex(rest, acc, ctx)
 
@@ -325,4 +333,29 @@ defmodule Loxe.Lexer do
       [_] -> lex(<<>>, acc, ctx)
     end
   end
+
+  @lexemes Map.merge(
+             Map.new(@punct),
+             for({lit, {kind, nil}} <- @keywords, into: %{}, do: {kind, lit})
+           )
+
+  @doc """
+  Returns the source text of a token kind with fixed text, or `nil` for
+  kinds whose text varies (`:ident`, `:string`, `:number`, `:bool`) and
+  for `:eof`.
+
+  ## Examples
+
+      iex> Loxe.Lexer.lexeme(:bang_equal)
+      "!="
+
+      iex> Loxe.Lexer.lexeme(:nil_lit)
+      "nil"
+
+      iex> Loxe.Lexer.lexeme(:ident)
+      nil
+
+  """
+  @spec lexeme(tokenkind() | :ident | :string | :number | :bool) :: String.t() | nil
+  def lexeme(kind), do: Map.get(@lexemes, kind)
 end

@@ -10,4 +10,13 @@ defmodule Loxe.Span do
           start: non_neg_integer(),
           end: non_neg_integer()
         }
+
+  @spec join(t(), t()) :: t()
+  def join(%__MODULE__{source_id: source_id} = a, %__MODULE__{source_id: source_id} = b) do
+    %__MODULE__{
+      source_id: source_id,
+      start: min(a.start, b.start),
+      end: max(a.end, b.end)
+    }
+  end
 end

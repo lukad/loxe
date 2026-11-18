@@ -6,8 +6,10 @@ defmodule Loxe.LexerTest do
   alias Loxe.Lexer.Error
   alias Loxe.Span
 
+  # Lexes `src` and drops the trailing `:eof` token.
   defp lex!(src, id \\ 0) do
     {:ok, tokens} = Lexer.lex(src, id)
+    {{:eof, nil, _}, tokens} = List.pop_at(tokens, -1)
     tokens
   end
 
@@ -24,15 +26,22 @@ defmodule Loxe.LexerTest do
     err
   end
 
-  describe "empty input and trivia" do
-    test "empty source produces no tokens" do
-      assert Lexer.lex("", 0) == {:ok, []}
+  describe "end of input" do
+    test "empty source produces only :eof" do
+      assert Lexer.lex("", 3) == {:ok, [{:eof, nil, %Span{source_id: 3, start: 0, end: 0}}]}
     end
 
-    test "whitespace only produces no tokens" do
-      assert Lexer.lex(" \t\r\n  \n", 0) == {:ok, []}
+    test "whitespace only produces only :eof" do
+      assert {:ok, [{:eof, nil, %Span{start: 7, end: 7}}]} = Lexer.lex(" \t\r\n  \n", 0)
     end
 
+    test ":eof is last and has an empty span at the end of the source" do
+      {:ok, tokens} = Lexer.lex("a + b // done", 0)
+      assert {:eof, nil, %Span{start: 13, end: 13}} = List.last(tokens)
+    end
+  end
+
+  describe "trivia" do
     test "line comments are skipped up to the newline" do
       assert kinds("// a comment\n+") == [:plus]
     end
