@@ -283,7 +283,7 @@ defmodule Loxe.ParserTest do
     test "for with all clauses" do
       assert [
                %For{
-                 init: %VarDecl{name: %Ident{name: "i"}, value: %Literal{value: 0.0}},
+                 init: %VarDecl{name: %Ident{name: "i"}, value: %Literal{value: +0.0}},
                  condition: %Binary{op: :lt},
                  update: %Assign{name: "i"},
                  body: %Print{}
