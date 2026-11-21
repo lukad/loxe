@@ -1,6 +1,6 @@
 defmodule Loxe.Interpreter.Error do
   @moduledoc """
-  Raised by `Loxe.Interpreter.eval/1` when evaluation fails.
+  Returned by `Loxe.Interpreter.run/2` when a program fails.
 
   `span` covers the expression that failed. `kind` is one of:
 
@@ -11,6 +11,8 @@ defmodule Loxe.Interpreter.Error do
     * `:division_by_zero` - the right side of `/` is zero.
     * `:overflow` - the result of `+`, `-`, `*` or `/` is too large for a
       float, such as multiplying the largest float by 10.
+    * `{:undefined_variable, name}` - a variable was read or assigned but
+      never declared. `span` covers the variable or the assignment.
   """
 
   defexception [:kind, :span]
@@ -20,7 +22,8 @@ defmodule Loxe.Interpreter.Error do
             {:invalid_operands, Loxe.Ast.binary_op()}
             | {:invalid_operand, Loxe.Ast.unary_op()}
             | :division_by_zero
-            | :overflow,
+            | :overflow
+            | {:undefined_variable, String.t()},
           span: Loxe.Span.t()
         }
 
@@ -33,6 +36,7 @@ defmodule Loxe.Interpreter.Error do
   defp describe({:invalid_operand, op}), do: "invalid operand for #{unary_symbol(op)}"
   defp describe(:division_by_zero), do: "division by zero"
   defp describe(:overflow), do: "overflow"
+  defp describe({:undefined_variable, name}), do: "undefined variable #{name}"
 
   defp binary_symbol(:or), do: "or"
   defp binary_symbol(:and), do: "and"

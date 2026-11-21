@@ -3,8 +3,8 @@ defmodule Loxe.InterpreterTest do
   doctest Loxe.Interpreter
 
   alias Loxe.{Interpreter, Lexer, Parser, Span}
-  alias Loxe.Ast.{Binary, ExprStmt, Literal, Unary}
-  alias Loxe.Interpreter.Error
+  alias Loxe.Ast.{Binary, Ident, Literal, Unary, VarDecl}
+  alias Loxe.Interpreter.{Error, State}
 
   @span %Span{source_id: 0, start: 0, end: 0}
 
@@ -18,10 +18,39 @@ defmodule Loxe.InterpreterTest do
   defp to_node(%{span: _} = node), do: node
   defp to_node(value), do: lit(value)
 
-  defp eval(expr), do: Interpreter.eval(to_node(expr))
+  # Evaluates `expr` by running `var result = expr;`.
+  defp run_expr(expr) do
+    decl = %VarDecl{name: %Ident{name: "result", span: @span}, value: to_node(expr), span: @span}
+    Interpreter.run([decl])
+  end
+
+  defp eval(expr) do
+    {:ok, state} = run_expr(expr)
+    state.globals["result"]
+  end
 
   defp error(expr) do
-    assert_raise Error, fn -> eval(expr) end
+    {:error, %Error{} = error} = run_expr(expr)
+    error
+  end
+
+  defp parse!(src) do
+    {:ok, tokens} = Lexer.lex(src, 0)
+    {:ok, decls} = Parser.parse(tokens)
+    decls
+  end
+
+  # Runs `src` and returns what it printed.
+  defp output(src) do
+    {:ok, io} = StringIO.open("")
+    {:ok, _state} = Interpreter.run(parse!(src), %State{out: io})
+    {:ok, {"", out}} = StringIO.close(io)
+    out
+  end
+
+  defp run_error(src) do
+    {:error, %Error{} = error} = Interpreter.run(parse!(src))
+    error
   end
 
   defp boom, do: unary(:neg, "boom")
@@ -142,7 +171,7 @@ defmodule Loxe.InterpreterTest do
   end
 
   describe "logical operators" do
-    test "and returns the left operand if it is falsey" do
+    test "and returns the left operand if it is falsy" do
       assert eval(bin(:and, nil, "x")) == nil
       assert eval(bin(:and, false, "x")) == false
     end
@@ -157,12 +186,12 @@ defmodule Loxe.InterpreterTest do
       assert eval(bin(:or, 0.0, true)) == 0.0
     end
 
-    test "or returns the right operand if the left is falsey" do
+    test "or returns the right operand if the left is falsy" do
       assert eval(bin(:or, nil, "x")) == "x"
       assert eval(bin(:or, false, false)) == false
     end
 
-    test "and does not evaluate the right side if the left is falsey" do
+    test "and does not evaluate the right side if the left is falsy" do
       assert eval(bin(:and, false, boom())) == false
     end
 
@@ -171,8 +200,8 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "the right side is evaluated when needed" do
-      assert_raise Error, fn -> eval(bin(:and, true, boom())) end
-      assert_raise Error, fn -> eval(bin(:or, false, boom())) end
+      assert %Error{} = error(bin(:and, true, boom()))
+      assert %Error{} = error(bin(:or, false, boom()))
     end
   end
 
@@ -236,11 +265,10 @@ defmodule Loxe.InterpreterTest do
     end
   end
 
-  describe "source code" do
+  describe "expressions from source" do
     defp run(src) do
-      {:ok, tokens} = Lexer.lex(src <> ";", 0)
-      {:ok, [%ExprStmt{expr: expr}]} = Parser.parse(tokens)
-      Interpreter.eval(expr)
+      {:ok, state} = Interpreter.run(parse!("var result = #{src};"))
+      state.globals["result"]
     end
 
     test "precedence" do
@@ -261,9 +289,160 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "error span points at the source" do
-      src = ~s|1 + (2 * "x")|
-      error = assert_raise Error, fn -> run(src) end
+      src = ~s|print 1 + (2 * "x");|
+      error = run_error(src)
       assert binary_part(src, error.span.start, error.span.end - error.span.start) == ~s(2 * "x")
+    end
+  end
+
+  describe "print" do
+    test "numbers without a fractional part have no decimal point" do
+      assert output("print 3; print -2; print 1000000; print 0;") == "3\n-2\n1000000\n0\n"
+    end
+
+    test "numbers with a fractional part" do
+      assert output("print 2.5; print -0.25; print 1 / 4;") == "2.5\n-0.25\n0.25\n"
+    end
+
+    test "strings are printed without quotes" do
+      assert output(~s(print "hello"; print "";)) == "hello\n\n"
+    end
+
+    test "nil and booleans" do
+      assert output("print nil; print true; print false;") == "nil\ntrue\nfalse\n"
+    end
+
+    test "output is in program order" do
+      assert output("print 1; print 2; print 3;") == "1\n2\n3\n"
+    end
+
+    test "nothing after an error runs" do
+      {:ok, io} = StringIO.open("")
+      decls = parse!(~s(print 1; print -"a"; print 2;))
+      assert {:error, %Error{}} = Interpreter.run(decls, %State{out: io})
+      assert StringIO.contents(io) == {"", "1\n"}
+    end
+  end
+
+  describe "global variables" do
+    test "declaration with an initializer" do
+      assert output("var a = 1 + 2; print a;") == "3\n"
+    end
+
+    test "declaration without an initializer is nil" do
+      assert output("var a; print a;") == "nil\n"
+    end
+
+    test "globals can be redeclared" do
+      assert output("var a = 1; var a = 2; print a;") == "2\n"
+    end
+
+    test "assignment" do
+      assert output("var a = 1; a = a + 1; print a;") == "2\n"
+    end
+
+    test "assignment evaluates to the assigned value" do
+      assert output("var a; print a = 3;") == "3\n"
+    end
+
+    test "chained assignment" do
+      assert output("var a; var b; a = b = 5; print a; print b;") == "5\n5\n"
+    end
+
+    test "globals are returned in the state" do
+      {:ok, state} = Interpreter.run(parse!(~s(var a = 1; var b = "x";)))
+      assert state.globals == %{"a" => 1.0, "b" => "x"}
+    end
+
+    test "running with an earlier state keeps its globals" do
+      {:ok, state} = Interpreter.run(parse!("var a = 1;"))
+      {:ok, state} = Interpreter.run(parse!("a = a + 1;"), state)
+      assert state.globals["a"] == 2.0
+    end
+
+    test "empty program" do
+      assert {:ok, %State{}} = Interpreter.run([])
+    end
+  end
+
+  describe "undefined variables" do
+    test "reading" do
+      assert %Error{kind: {:undefined_variable, "a"}} = run_error("print a;")
+    end
+
+    test "assigning" do
+      assert %Error{kind: {:undefined_variable, "a"}} = run_error("a = 1;")
+    end
+
+    test "using a variable in its own initializer" do
+      assert %Error{kind: {:undefined_variable, "a"}} = run_error("var a = a;")
+    end
+
+    test "read span covers the name" do
+      src = "print 1 + foo;"
+      assert run_error(src).span == %Span{source_id: 0, start: 10, end: 13}
+    end
+
+    test "assignment span covers the assignment" do
+      src = "foo = 1 + 2;"
+      assert run_error(src).span == %Span{source_id: 0, start: 0, end: 11}
+    end
+
+    test "message" do
+      assert Exception.message(run_error("print foo;")) == "undefined variable foo at 6..9"
+    end
+  end
+
+  describe "blocks" do
+    test "run their statements in order" do
+      assert output("{ print 1; print 2; }") == "1\n2\n"
+    end
+
+    test "empty block" do
+      assert output("{} print 1;") == "1\n"
+    end
+
+    test "locals are not visible after the block" do
+      assert %Error{kind: {:undefined_variable, "a"}} = run_error("{ var a = 1; } print a;")
+    end
+
+    test "locals are not added to the globals" do
+      {:ok, state} = Interpreter.run(parse!("{ var a = 1; }"))
+      assert state.globals == %{}
+    end
+
+    test "can read and assign globals" do
+      assert output("var a = 1; { print a; a = 2; } print a;") == "1\n2\n"
+    end
+
+    test "a local shadows a global" do
+      assert output(~s(var a = "global"; { var a = "local"; print a; } print a;)) ==
+               "local\nglobal\n"
+    end
+
+    test "a local shadows an outer local" do
+      src = ~s({ var a = "outer"; { var a = "inner"; print a; } print a; })
+      assert output(src) == "inner\nouter\n"
+    end
+
+    test "nested blocks see outer locals" do
+      assert output("{ var a = 1; { { print a; } } }") == "1\n"
+    end
+
+    test "assigning an outer local from a nested block" do
+      assert output("{ var a = 1; { a = 2; } print a; }") == "2\n"
+    end
+
+    test "assigning a shadowing local leaves the outer one unchanged" do
+      assert output("{ var a = 1; { var a = 2; a = 3; } print a; }") == "1\n"
+    end
+
+    test "an initializer can read the shadowed variable" do
+      assert output("var a = 1; { var a = a + 1; print a; } print a;") == "2\n1\n"
+    end
+
+    test "locals can be redeclared in the same block" do
+      assert output("{ var a = 1; var a = 2; print a; }") == "2\n"
     end
   end
 end

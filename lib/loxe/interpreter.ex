@@ -1,14 +1,14 @@
 defmodule Loxe.Interpreter do
   @moduledoc """
-  Evaluates `Loxe.Ast` expressions.
+  Runs Lox programs parsed by `Loxe.Parser`.
 
-  Only `Loxe.Ast.Literal`, `Loxe.Ast.Binary` and `Loxe.Ast.Unary` are
-  supported so far.
+  Supported so far: expression statements, `print`, `var`, blocks, and
+  literal, variable, assignment, unary and binary expressions.
 
   ## Values
 
   Values are `nil`, booleans, floats and strings (`t:value/0`). `nil` and
-  `false` are falsey. Everything else is truthy, including `0.0` and `""`.
+  `false` are falsy. Everything else is truthy, including `0.0` and `""`.
 
   ## Operators
 
@@ -21,65 +21,151 @@ defmodule Loxe.Interpreter do
     * Unary `-` takes a number. `!` takes any value and returns a boolean.
 
   Using an operator on the wrong types, dividing by zero, or getting a
-  result too large for a float raises a `Loxe.Interpreter.Error`. There is
-  no infinity or NaN.
+  result too large for a float is an error. There is no infinity or NaN.
+
+  ## Variables
+
+  `var` declares a variable. Without an initializer its value is `nil`.
+  Variables declared at the top level are globals; variables declared in a
+  block are visible until the end of the block and can shadow outer ones.
+  Reading or assigning a variable that was never declared is an error.
+
+  Assignment is an expression that returns the assigned value, so
+  `a = b = 1` sets both.
+
+  ## Output
+
+  `print` writes the value and a newline to `state.out` (see
+  `Loxe.Interpreter.State`). Numbers with no fractional part are printed
+  without a decimal point, so `print 3;` prints `3`. Strings are printed
+  without quotes.
   """
 
   alias Loxe.Interpreter.Error
+  alias Loxe.Interpreter.State
+  alias Loxe.Interpreter.Env
   alias Loxe.Ast
 
   alias Loxe.Ast.{
+    Assign,
+    Block,
     Binary,
+    ExprStmt,
+    Ident,
     Literal,
-    Unary
+    Print,
+    Unary,
+    Var,
+    VarDecl
   }
 
   @typedoc "A Lox value."
   @type value() :: nil | boolean() | float() | String.t()
 
   @doc """
-  Evaluates `expr` and returns its value.
+  Runs `decls` and returns `{:ok, state}` with the final state.
 
-  Raises `Loxe.Interpreter.Error` on a type error, division by zero or
-  overflow.
+  Pass a `state` returned by an earlier call to keep its globals, for
+  example in a REPL.
+
+  Stops at the first error and returns `{:error, error}` with a
+  `Loxe.Interpreter.Error`. Changes to the state made before the error are
+  lost, but anything already printed stays printed.
 
   ## Examples
 
-      iex> {:ok, tokens} = Loxe.Lexer.lex("(1 + 2) * 3;", 0)
-      iex> {:ok, [%Loxe.Ast.ExprStmt{expr: expr}]} = Loxe.Parser.parse(tokens)
-      iex> Loxe.Interpreter.eval(expr)
+      iex> {:ok, tokens} = Loxe.Lexer.lex("var x = (1 + 2) * 3;", 0)
+      iex> {:ok, decls} = Loxe.Parser.parse(tokens)
+      iex> {:ok, state} = Loxe.Interpreter.run(decls)
+      iex> state.globals["x"]
       9.0
 
       iex> {:ok, tokens} = Loxe.Lexer.lex(~s(1 + "a";), 0)
-      iex> {:ok, [%Loxe.Ast.ExprStmt{expr: expr}]} = Loxe.Parser.parse(tokens)
-      iex> Loxe.Interpreter.eval(expr)
-      ** (Loxe.Interpreter.Error) invalid operands for + at 0..7
+      iex> {:ok, decls} = Loxe.Parser.parse(tokens)
+      iex> Loxe.Interpreter.run(decls)
+      {:error,
+       %Loxe.Interpreter.Error{
+         kind: {:invalid_operands, :add},
+         span: %Loxe.Span{source_id: 0, start: 0, end: 7}
+       }}
 
   """
-  @spec eval(Ast.expr()) :: value()
-  def eval(%Literal{value: value}) do
-    value
+  @spec run([Ast.decl()], State.t()) :: {:ok, State.t()} | {:error, Error.t()}
+  def run(decls, state \\ %State{}) do
+    {:ok, :global, state} = exec_all(decls, :global, state)
+    {:ok, state}
+  rescue
+    error in Error -> {:error, error}
   end
 
-  def eval(%Binary{op: :and, left: left, right: right}) do
-    left = eval(left)
-    if truthy?(left), do: eval(right), else: left
+  defp exec_all(decls, env, state) do
+    Enum.reduce_while(decls, {:ok, env, state}, fn decl, {:ok, env, state} ->
+      case exec(decl, env, state) do
+        {:ok, _, _} = ok -> {:cont, ok}
+        other -> {:halt, other}
+      end
+    end)
   end
 
-  def eval(%Binary{op: :or, left: left, right: right}) do
-    left = eval(left)
-    if truthy?(left), do: left, else: eval(right)
+  defp exec(%ExprStmt{expr: expr}, env, state) do
+    {_, env, state} = eval(expr, env, state)
+    {:ok, env, state}
   end
 
-  def eval(%Binary{op: op, left: left, right: right, span: span}) do
-    a = eval(left)
-    b = eval(right)
-    binary(op, a, b, span)
+  defp exec(%Print{expr: expr}, env, state) do
+    {value, env, state} = eval(expr, env, state)
+    IO.puts(state.out, stringify(value))
+    {:ok, env, state}
   end
 
-  def eval(%Unary{op: op, expr: expr, span: span}) do
-    value = eval(expr)
-    unary(op, value, span)
+  defp exec(%VarDecl{name: %Ident{name: n}, value: expr}, env, state) do
+    {value, env, state} = if expr, do: eval(expr, env, state), else: {nil, env, state}
+    {env, state} = Env.declare(n, value, env, state)
+    {:ok, env, state}
+  end
+
+  defp exec(%Block{body: decls}, env, state) do
+    case exec_all(decls, Env.scope(env), state) do
+      {:ok, _inner, state} -> {:ok, env, state}
+      other -> other
+    end
+  end
+
+  @spec eval(Ast.expr(), Env.t(), State.t()) :: {value(), Env.t(), State.t()}
+  defp eval(%Literal{value: value}, env, state) do
+    {value, env, state}
+  end
+
+  defp eval(%Binary{op: :and, left: left, right: right}, env, state) do
+    {left, env, state} = eval(left, env, state)
+    if truthy?(left), do: eval(right, env, state), else: {left, env, state}
+  end
+
+  defp eval(%Binary{op: :or, left: left, right: right}, env, state) do
+    {left, env, state} = eval(left, env, state)
+    if truthy?(left), do: {left, env, state}, else: eval(right, env, state)
+  end
+
+  defp eval(%Binary{op: op, left: left, right: right, span: span}, env, state) do
+    {a, env, state} = eval(left, env, state)
+    {b, env, state} = eval(right, env, state)
+    {binary(op, a, b, span), env, state}
+  end
+
+  defp eval(%Unary{op: op, expr: expr, span: span}, env, state) do
+    {value, env, state} = eval(expr, env, state)
+    {unary(op, value, span), env, state}
+  end
+
+  defp eval(%Assign{} = assign, env, state) do
+    {value, env, state} = eval(assign.value, env, state)
+    state = Env.assign(assign.name, value, assign.span, env, state)
+    {value, env, state}
+  end
+
+  defp eval(%Var{name: name, span: span}, env, state) do
+    value = Env.lookup(name, span, env, state)
+    {value, env, state}
   end
 
   defp binary(:add, a, b, _) when is_binary(a) and is_binary(b), do: a <> b
@@ -111,4 +197,10 @@ defmodule Loxe.Interpreter do
   defp truthy?(nil), do: false
   defp truthy?(false), do: false
   defp truthy?(_), do: true
+
+  defp stringify(nil), do: "nil"
+  defp stringify(b) when is_boolean(b), do: to_string(b)
+  defp stringify(n) when is_float(n) and n == trunc(n), do: Integer.to_string(trunc(n))
+  defp stringify(n) when is_float(n), do: Float.to_string(n)
+  defp stringify(s) when is_binary(s), do: s
 end
