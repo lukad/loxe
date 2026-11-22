@@ -527,6 +527,203 @@ defmodule Loxe.InterpreterTest do
     end
   end
 
+  describe "for" do
+    test "with all clauses" do
+      assert output("for (var i = 0; i < 3; i = i + 1) print i;") == "0\n1\n2\n"
+    end
+
+    test "runs neither the body nor the update if the condition starts false" do
+      assert output("var a = 0; for (; false; a = 1) print 1; print a;") == "0\n"
+    end
+
+    test "the initializer runs once, before the condition" do
+      src = "var n = 0; for (n = n + 1; n < 3; n = n + 1) print n; print n;"
+      assert output(src) == "1\n2\n3\n"
+    end
+
+    test "the update runs after the body and before the condition" do
+      src = """
+      var log = "";
+      for (var i = 0; (log = log + "c") and i < 2; log = log + "u") {
+        log = log + "b";
+        i = i + 1;
+      }
+      print log;
+      """
+
+      assert output(src) == "cbucbuc\n"
+    end
+
+    test "without an initializer" do
+      assert output("var i = 0; for (; i < 2; i = i + 1) print i;") == "0\n1\n"
+    end
+
+    test "without an update" do
+      assert output("for (var i = 0; i < 2;) { print i; i = i + 1; }") == "0\n1\n"
+    end
+
+    test "without a condition loops until break" do
+      src = "for (var i = 0;; i = i + 1) { if (i == 3) break; print i; }"
+      assert output(src) == "0\n1\n2\n"
+    end
+
+    test "with every clause left out" do
+      assert output("var i = 0; for (;;) { i = i + 1; if (i == 3) break; } print i;") == "3\n"
+    end
+
+    test "falsy and truthy conditions" do
+      assert output("for (; nil;) print 1; for (; false;) print 2; print 3;") == "3\n"
+      assert output(~s|for (; "";) { print 1; break; }|) == "1\n"
+      assert output("for (; 0;) { print 1; break; }") == "1\n"
+    end
+
+    test "the loop variable is not visible after the loop" do
+      assert %Error{kind: {:undefined_variable, "i"}} =
+               run_error("for (var i = 0; i < 1; i = i + 1) {} print i;")
+    end
+
+    test "the loop variable is not a global" do
+      {:ok, state} = Interpreter.run(parse!("for (var i = 0; i < 2; i = i + 1) {}"))
+      assert state.globals == %{}
+    end
+
+    test "the loop variable shadows an outer variable" do
+      src = "var i = 10; for (var i = 0; i < 2; i = i + 1) print i; print i;"
+      assert output(src) == "0\n1\n10\n"
+
+      src = "{ var i = 10; for (var i = 0; i < 2; i = i + 1) print i; print i; }"
+      assert output(src) == "0\n1\n10\n"
+    end
+
+    test "the loop variable's initializer can read the shadowed variable" do
+      assert output("var i = 5; for (var i = i + 1; i < 8; i = i + 1) print i;") == "6\n7\n"
+    end
+
+    test "an assignment initializer changes the outer variable" do
+      assert output("var i; for (i = 0; i < 3; i = i + 1) {} print i;") == "3\n"
+      assert output("{ var i; for (i = 0; i < 3; i = i + 1) {} print i; }") == "3\n"
+    end
+
+    test "the body can assign outer variables" do
+      src = "var sum = 0; for (var i = 1; i <= 4; i = i + 1) sum = sum + i; print sum;"
+      assert output(src) == "10\n"
+    end
+
+    test "each iteration gets a fresh block scope" do
+      src = "for (var i = 0; i < 2; i = i + 1) { var x; print x; x = i; }"
+      assert output(src) == "nil\nnil\n"
+    end
+
+    test "body locals are not visible after the loop" do
+      assert %Error{kind: {:undefined_variable, "x"}} =
+               run_error("for (var i = 0; i < 1; i = i + 1) { var x = 1; } print x;")
+    end
+
+    test "the body can shadow the loop variable" do
+      src = "for (var i = 0; i < 2; i = i + 1) { var i = 9; print i; }"
+      assert output(src) == "9\n9\n"
+    end
+
+    test "nested loops" do
+      src = """
+      for (var i = 0; i < 2; i = i + 1)
+        for (var j = 0; j < 2; j = j + 1)
+          print i * 10 + j;
+      """
+
+      assert output(src) == "0\n1\n10\n11\n"
+    end
+
+    test "an error in the initializer is returned" do
+      assert %Error{kind: {:invalid_operand, :neg}} = run_error(~s|for (var i = -"a";;) {}|)
+      assert %Error{kind: {:invalid_operand, :neg}} = run_error(~s|for (-"a";;) {}|)
+    end
+
+    test "an error in the condition is returned" do
+      assert %Error{kind: {:invalid_operand, :neg}} = run_error(~s|for (; -"a";) {}|)
+    end
+
+    test "an error in the update stops the loop" do
+      {:ok, io} = StringIO.open("")
+      decls = parse!(~s|for (var i = 0; i < 5; i = i - "a") print i;|)
+
+      assert {:error, %Error{kind: {:invalid_operands, :sub}}} =
+               Interpreter.run(decls, %State{out: io})
+
+      assert StringIO.contents(io) == {"", "0\n"}
+    end
+
+    test "an error in the body stops the loop" do
+      {:ok, io} = StringIO.open("")
+      decls = parse!(~s|for (var i = 0;; i = i + 1) { print i; if (i == 1) -"a"; }|)
+
+      assert {:error, %Error{kind: {:invalid_operand, :neg}}} =
+               Interpreter.run(decls, %State{out: io})
+
+      assert StringIO.contents(io) == {"", "0\n1\n"}
+    end
+
+    test "many iterations" do
+      src = "var n = 0; for (var i = 0; i < 100000; i = i + 1) n = n + 1; print n;"
+      assert output(src) == "100000\n"
+    end
+
+    test "break leaves the loop without running the update" do
+      src = "var i; for (i = 0; i < 5; i = i + 1) { if (i == 2) break; } print i;"
+      assert output(src) == "2\n"
+    end
+
+    test "break only leaves the innermost loop" do
+      src = """
+      for (var i = 0; i < 2; i = i + 1) {
+        for (;;) { print i; break; }
+      }
+      """
+
+      assert output(src) == "0\n1\n"
+      assert output("for (var i = 0; i < 2; i = i + 1) { while (true) break; print i; }") == "0\n1\n"
+    end
+
+    test "break does not leak the loop variable or body locals" do
+      assert %Error{kind: {:undefined_variable, "i"}} =
+               run_error("for (var i = 0;;) { break; } print i;")
+
+      assert %Error{kind: {:undefined_variable, "x"}} =
+               run_error("for (;;) { var x = 1; break; } print x;")
+    end
+
+    test "globals declared after the loop are still globals" do
+      {:ok, state} = Interpreter.run(parse!("for (var i = 0;;) { break; } var y = 2;"))
+      assert state.globals == %{"y" => 2.0}
+    end
+
+    test "continue runs the update" do
+      src = "for (var i = 0; i < 4; i = i + 1) { if (i == 1) continue; print i; }"
+      assert output(src) == "0\n2\n3\n"
+    end
+
+    test "continue from a nested block" do
+      src = "for (var i = 0; i < 2; i = i + 1) { { { continue; } } print i; } print 9;"
+      assert output(src) == "9\n"
+    end
+
+    test "continue only affects the innermost loop" do
+      src = """
+      for (var i = 0; i < 2; i = i + 1) {
+        for (var j = 0; j < 2; j = j + 1) { continue; print j; }
+        print i;
+      }
+      """
+
+      assert output(src) == "0\n1\n"
+    end
+
+    test "break after the loop is an error" do
+      assert %Error{kind: {:outside_loop, :break}} =
+               run_error("for (var i = 0; i < 1; i = i + 1) {} break;")
+    end
+  end
+
   describe "break" do
     test "leaves the loop" do
       assert output("while (true) { print 1; break; print 2; } print 3;") == "1\n3\n"

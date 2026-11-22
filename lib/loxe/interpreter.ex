@@ -3,7 +3,7 @@ defmodule Loxe.Interpreter do
   Runs Lox programs parsed by `Loxe.Parser`.
 
   Supported so far: expression statements, `print`, `var`, blocks, `if`,
-  `while`, `break`, `continue`, and literal, grouping, variable,
+  `while`, `for`, `break`, `continue`, and literal, grouping, variable,
   assignment, unary and binary expressions.
 
   ## Values
@@ -44,6 +44,12 @@ defmodule Loxe.Interpreter do
   while it is truthy. `break` leaves the innermost loop, and `continue`
   skips to its next iteration. Using either outside a loop is an error.
 
+  `for (init; condition; update) body` runs `init` once, then loops like
+  `while`, evaluating `update` after each iteration, including one cut
+  short by `continue`. Any of the three clauses can be left out. Without
+  a condition, the loop runs until `break`. A variable declared in `init`
+  is local to the loop.
+
   ## Output
 
   `print` writes the value and a newline to `state.out` (see
@@ -61,6 +67,7 @@ defmodule Loxe.Interpreter do
     Break,
     Continue,
     ExprStmt,
+    For,
     Grouping,
     Ident,
     If,
@@ -163,18 +170,27 @@ defmodule Loxe.Interpreter do
   end
 
   defp exec(%While{} = loop, env, state) do
-    {value, env, state} = eval(loop.condition, env, state)
+    loop(loop.condition, loop.body, nil, env, state)
+  end
 
-    if truthy?(value) do
-      case exec(loop.body, env, state) do
-        {:ok, env, state} -> exec(loop, env, state)
-        {{:continue, _}, env, state} -> exec(loop, env, state)
-        {{:break, _}, env, state} -> {:ok, env, state}
-        other -> other
+  defp exec(%For{} = loop, env, state) do
+    inner = Env.scope(env)
+
+    {:ok, inner, state} =
+      case loop.init do
+        nil ->
+          {:ok, inner, state}
+
+        %VarDecl{} = decl ->
+          exec(decl, inner, state)
+
+        expr ->
+          {_, inner, state} = eval(expr, inner, state)
+          {:ok, inner, state}
       end
-    else
-      {:ok, env, state}
-    end
+
+    {tag, _inner, state} = loop(loop.condition, loop.body, loop.update, inner, state)
+    {tag, env, state}
   end
 
   defp exec(%Break{span: span}, env, state) do
@@ -261,4 +277,35 @@ defmodule Loxe.Interpreter do
   defp stringify(n) when is_float(n) and n == trunc(n), do: Integer.to_string(trunc(n))
   defp stringify(n) when is_float(n), do: Float.to_string(n)
   defp stringify(s) when is_binary(s), do: s
+
+  defp loop(condition, body, update, env, state) do
+    {value, env, state} =
+      if condition do
+        eval(condition, env, state)
+      else
+        {true, env, state}
+      end
+
+    if truthy?(value) do
+      case exec(body, env, state) do
+        {:ok, env, state} -> continue_loop(condition, body, update, env, state)
+        {{:continue, _}, env, state} -> continue_loop(condition, body, update, env, state)
+        {{:break, _}, env, state} -> {:ok, env, state}
+        other -> other
+      end
+    else
+      {:ok, env, state}
+    end
+  end
+
+  defp continue_loop(condition, body, update, env, state) do
+    {_, env, state} =
+      if update do
+        eval(update, env, state)
+      else
+        {nil, env, state}
+      end
+
+    loop(condition, body, update, env, state)
+  end
 end
