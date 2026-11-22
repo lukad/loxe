@@ -14,6 +14,7 @@ defmodule Loxe.ParserTest do
     For,
     Fun,
     Get,
+    Grouping,
     Ident,
     If,
     Literal,
@@ -52,6 +53,7 @@ defmodule Loxe.ParserTest do
   defp to_sexp(%Literal{value: v}) when is_binary(v), do: inspect(v)
   defp to_sexp(%Literal{value: v}), do: to_string(v)
   defp to_sexp(%Var{name: name}), do: name
+  defp to_sexp(%Grouping{expr: e}), do: "(group #{to_sexp(e)})"
   defp to_sexp(%Unary{op: op, expr: e}), do: "(#{op} #{to_sexp(e)})"
   defp to_sexp(%Binary{op: op, left: l, right: r}), do: "(#{op} #{to_sexp(l)} #{to_sexp(r)})"
   defp to_sexp(%Assign{name: name, value: v}), do: "(= #{name} #{to_sexp(v)})"
@@ -145,9 +147,9 @@ defmodule Loxe.ParserTest do
     end
 
     test "parentheses override precedence" do
-      assert sexp("(a + b) * c") == "(mul (add a b) c)"
-      assert sexp("a - (b - c)") == "(sub a (sub b c))"
-      assert sexp("((a))") == "a"
+      assert sexp("(a + b) * c") == "(mul (group (add a b)) c)"
+      assert sexp("a - (b - c)") == "(sub a (group (sub b c)))"
+      assert sexp("((a))") == "(group (group a))"
     end
 
     test "unary minus" do
@@ -188,7 +190,7 @@ defmodule Loxe.ParserTest do
     end
 
     test "property access on a grouped expression" do
-      assert sexp("(a + b).c") == "(get (add a b) c)"
+      assert sexp("(a + b).c") == "(get (group (add a b)) c)"
     end
   end
 
@@ -209,6 +211,7 @@ defmodule Loxe.ParserTest do
       assert sexp("a.b = 1") == "(set a b 1.0)"
       assert sexp("a.b.c = 1") == "(set (get a b) c 1.0)"
       assert sexp("f().x = 1") == "(set (call f) x 1.0)"
+      assert sexp("(a).b = 1") == "(set (group a) b 1.0)"
     end
 
     test "assignment inside call arguments" do
@@ -216,7 +219,7 @@ defmodule Loxe.ParserTest do
     end
 
     test "invalid targets" do
-      for src <- ["1 = 2;", "a + b = c;", "f() = 1;", "-a = 1;"] do
+      for src <- ["1 = 2;", "a + b = c;", "f() = 1;", "-a = 1;", "(a) = 1;", "(a.b) = 1;"] do
         assert %Error{kind: :invalid_assign_target} = error(src), src
       end
     end
@@ -352,11 +355,12 @@ defmodule Loxe.ParserTest do
       assert call == span(src, "f(a, b)")
     end
 
-    test "grouped expression span includes the parentheses" do
+    test "grouping span includes the parentheses" do
       src = "(a + b) * c;"
-      assert [%ExprStmt{expr: %Binary{span: span, left: left}}] = parse!(src)
+      assert [%ExprStmt{expr: %Binary{span: span, left: %Grouping{} = group}}] = parse!(src)
       assert span == span(src, "(a + b) * c")
-      assert left.span == span(src, "(a + b)")
+      assert group.span == span(src, "(a + b)")
+      assert group.expr.span == span(src, "a + b")
     end
 
     test "binary span" do

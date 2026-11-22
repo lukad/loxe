@@ -3,7 +3,7 @@ defmodule Loxe.Interpreter do
   Runs Lox programs parsed by `Loxe.Parser`.
 
   Supported so far: expression statements, `print`, `var`, blocks, and
-  literal, variable, assignment, unary and binary expressions.
+  literal, grouping, variable, assignment, unary and binary expressions.
 
   ## Values
 
@@ -51,6 +51,7 @@ defmodule Loxe.Interpreter do
     Block,
     Binary,
     ExprStmt,
+    Grouping,
     Ident,
     Literal,
     Print,
@@ -134,6 +135,10 @@ defmodule Loxe.Interpreter do
   @spec eval(Ast.expr(), Env.t(), State.t()) :: {value(), Env.t(), State.t()}
   defp eval(%Literal{value: value}, env, state) do
     {value, env, state}
+  end
+
+  defp eval(%Grouping{expr: expr}, env, state) do
+    eval(expr, env, state)
   end
 
   defp eval(%Binary{op: :and, left: left, right: right}, env, state) do

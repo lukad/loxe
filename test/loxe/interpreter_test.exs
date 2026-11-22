@@ -3,7 +3,7 @@ defmodule Loxe.InterpreterTest do
   doctest Loxe.Interpreter
 
   alias Loxe.{Interpreter, Lexer, Parser, Span}
-  alias Loxe.Ast.{Binary, Ident, Literal, Unary, VarDecl}
+  alias Loxe.Ast.{Binary, Grouping, Ident, Literal, Unary, VarDecl}
   alias Loxe.Interpreter.{Error, State}
 
   @span %Span{source_id: 0, start: 0, end: 0}
@@ -60,6 +60,19 @@ defmodule Loxe.InterpreterTest do
       for value <- [nil, true, false, 0.0, 1.5, "", "hello"] do
         assert eval(lit(value)) === value
       end
+    end
+  end
+
+  describe "grouping" do
+    test "evaluates to the inner expression" do
+      assert eval(%Grouping{expr: bin(:add, 1.0, 2.0), span: @span}) == 3.0
+      assert eval(%Grouping{expr: %Grouping{expr: lit("a"), span: @span}, span: @span}) == "a"
+    end
+
+    test "errors inside keep the inner span" do
+      span = %Span{source_id: 0, start: 1, end: 8}
+      group = %Grouping{expr: bin(:add, 1.0, "a", span), span: @span}
+      assert error(group).span == span
     end
   end
 
@@ -300,8 +313,7 @@ defmodule Loxe.InterpreterTest do
       src = ~s|print 1 + (2 * "x");|
       error = run_error(src)
 
-      assert binary_part(src, error.span.start, error.span.end - error.span.start) ==
-               ~s|(2 * "x")|
+      assert binary_part(src, error.span.start, error.span.end - error.span.start) == ~s(2 * "x")
     end
   end
 

@@ -38,9 +38,8 @@ defmodule Loxe.Parser do
   | calls, `.`        | left          |
 
   The target of `=` must be a variable or a property access. `a = 1`
-  becomes `Loxe.Ast.Assign` and `a.b = 1` becomes `Loxe.Ast.Set`.
-  There is no node for parentheses: `(1 + 2)` parses to a
-  `Loxe.Ast.Binary` whose span includes the parentheses.
+  becomes `Loxe.Ast.Assign` and `a.b = 1` becomes `Loxe.Ast.Set`. A
+  parenthesized target such as `(a) = 1` is an error.
   """
 
   alias Loxe.Lexer
@@ -57,6 +56,7 @@ defmodule Loxe.Parser do
     For,
     Fun,
     Get,
+    Grouping,
     Ident,
     If,
     Literal,
@@ -365,7 +365,7 @@ defmodule Loxe.Parser do
   defp nud([{:lparen, _, start} | rest]) do
     with {:ok, expr, rest} <- expr_bp(rest, 0),
          {:ok, stop, rest} <- expect(rest, :rparen) do
-      {:ok, %{expr | span: Span.join(start, stop)}, rest}
+      {:ok, %Grouping{expr: expr, span: Span.join(start, stop)}, rest}
     end
   end
 

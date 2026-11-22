@@ -18,6 +18,7 @@ defmodule Loxe.Ast do
     For,
     Fun,
     Get,
+    Grouping,
     If,
     Literal,
     Print,
@@ -33,6 +34,7 @@ defmodule Loxe.Ast do
 
   @type expr ::
           Literal.t()
+          | Grouping.t()
           | Var.t()
           | This.t()
           | Super.t()
@@ -81,6 +83,17 @@ defmodule Loxe.Ast do
     @enforce_keys [:value, :span]
     defstruct @enforce_keys
     @type t :: %__MODULE__{value: nil | boolean() | float() | String.t(), span: Span.t()}
+  end
+
+  defmodule Grouping do
+    @moduledoc """
+    A parenthesized expression, such as `(a + b)`. `span` includes the
+    parentheses.
+    """
+
+    @enforce_keys [:expr, :span]
+    defstruct @enforce_keys
+    @type t :: %__MODULE__{expr: Loxe.Ast.expr(), span: Span.t()}
   end
 
   defmodule Var do
