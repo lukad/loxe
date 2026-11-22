@@ -1,10 +1,11 @@
 defmodule Loxe.LexerTest do
   use ExUnit.Case, async: true
-  doctest Loxe.Lexer
 
   alias Loxe.Lexer
   alias Loxe.Lexer.Error
   alias Loxe.Span
+
+  doctest Loxe.Lexer
 
   # Lexes `src` and drops the trailing `:eof` token.
   defp lex!(src, id \\ 0) do

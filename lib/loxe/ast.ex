@@ -5,8 +5,6 @@ defmodule Loxe.Ast do
   Every node has a `span` with its location in the source.
   """
 
-  alias Loxe.Span
-
   alias __MODULE__.{
     Assign,
     Binary,
@@ -32,6 +30,8 @@ defmodule Loxe.Ast do
     VarDecl,
     While
   }
+
+  alias Loxe.Span
 
   @type expr ::
           Literal.t()
@@ -123,9 +123,11 @@ defmodule Loxe.Ast do
     A superclass method access, such as `super.init`.
     """
 
+    alias Loxe.Ast.Ident
+
     @enforce_keys [:method, :span]
     defstruct @enforce_keys
-    @type t :: %__MODULE__{method: Loxe.Ast.Ident.t(), span: Span.t()}
+    @type t :: %__MODULE__{method: Ident.t(), span: Span.t()}
   end
 
   defmodule Unary do
@@ -170,9 +172,11 @@ defmodule Loxe.Ast do
     A property access, such as `a.b`.
     """
 
+    alias Loxe.Ast.Ident
+
     @enforce_keys [:object, :name, :span]
     defstruct @enforce_keys
-    @type t :: %__MODULE__{object: Loxe.Ast.expr(), name: Loxe.Ast.Ident.t(), span: Span.t()}
+    @type t :: %__MODULE__{object: Loxe.Ast.expr(), name: Ident.t(), span: Span.t()}
   end
 
   defmodule Set do
@@ -180,12 +184,14 @@ defmodule Loxe.Ast do
     An assignment to a property, such as `a.b = 1`.
     """
 
+    alias Loxe.Ast.Ident
+
     @enforce_keys [:object, :name, :value, :span]
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
             object: Loxe.Ast.expr(),
-            name: Loxe.Ast.Ident.t(),
+            name: Ident.t(),
             value: Loxe.Ast.expr(),
             span: Span.t()
           }
@@ -285,11 +291,13 @@ defmodule Loxe.Ast do
     left out. `init` is a `Loxe.Ast.VarDecl` for `for (var i = 0; ...)`.
     """
 
+    alias Loxe.Ast.VarDecl
+
     @enforce_keys [:init, :condition, :update, :body, :span]
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
-            init: Loxe.Ast.VarDecl.t() | Loxe.Ast.expr() | nil,
+            init: VarDecl.t() | Loxe.Ast.expr() | nil,
             condition: Loxe.Ast.expr() | nil,
             update: Loxe.Ast.expr() | nil,
             body: Loxe.Ast.stmt(),
@@ -314,11 +322,13 @@ defmodule Loxe.Ast do
     A variable declaration. `value` is `nil` when there is no initializer.
     """
 
+    alias Loxe.Ast.Ident
+
     @enforce_keys [:name, :value, :span]
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
-            name: Loxe.Ast.Ident.t(),
+            name: Ident.t(),
             value: Loxe.Ast.expr() | nil,
             span: Span.t()
           }
@@ -329,12 +339,14 @@ defmodule Loxe.Ast do
     A function declaration.
     """
 
+    alias Loxe.Ast.Ident
+
     @enforce_keys [:name, :params, :body, :span]
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
-            name: Loxe.Ast.Ident.t(),
-            params: [Loxe.Ast.Ident.t()],
+            name: Ident.t(),
+            params: [Ident.t()],
             body: [Loxe.Ast.decl()],
             span: Span.t()
           }
@@ -345,15 +357,19 @@ defmodule Loxe.Ast do
     A class declaration.
     """
 
+    alias Loxe.Ast.Fun
+    alias Loxe.Ast.Ident
+    alias Loxe.Ast.Var
+
     @enforce_keys [:name, :super_class, :methods, :static_methods, :getters, :span]
     defstruct @enforce_keys
 
     @type t :: %__MODULE__{
-            name: Loxe.Ast.Ident.t(),
-            super_class: Loxe.Ast.Var.t() | nil,
-            methods: [Loxe.Ast.Fun.t()],
-            static_methods: [Loxe.Ast.Fun.t()],
-            getters: [Loxe.Ast.Fun.t()],
+            name: Ident.t(),
+            super_class: Var.t() | nil,
+            methods: [Fun.t()],
+            static_methods: [Fun.t()],
+            getters: [Fun.t()],
             span: Span.t()
           }
   end

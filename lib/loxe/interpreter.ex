@@ -52,15 +52,12 @@ defmodule Loxe.Interpreter do
   without quotes.
   """
 
-  alias Loxe.Interpreter.Error
-  alias Loxe.Interpreter.State
-  alias Loxe.Interpreter.Env
   alias Loxe.Ast
 
   alias Loxe.Ast.{
     Assign,
-    Block,
     Binary,
+    Block,
     Break,
     Continue,
     ExprStmt,
@@ -74,6 +71,10 @@ defmodule Loxe.Interpreter do
     VarDecl,
     While
   }
+
+  alias Loxe.Interpreter.Env
+  alias Loxe.Interpreter.Error
+  alias Loxe.Interpreter.State
 
   @typedoc "A Lox value."
   @type value() :: nil | boolean() | float() | String.t()

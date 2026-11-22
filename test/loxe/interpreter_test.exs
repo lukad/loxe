@@ -1,17 +1,17 @@
 defmodule Loxe.InterpreterTest do
   use ExUnit.Case, async: true
-  doctest Loxe.Interpreter
 
-  alias Loxe.{Interpreter, Lexer, Parser, Span}
   alias Loxe.Ast.{Binary, Grouping, Ident, Literal, Unary, VarDecl}
+  alias Loxe.{Interpreter, Lexer, Parser, Span}
   alias Loxe.Interpreter.{Error, State}
+
+  doctest Loxe.Interpreter
 
   @span %Span{source_id: 0, start: 0, end: 0}
 
   defp lit(value), do: %Literal{value: value, span: @span}
 
-  defp bin(op, l, r, span \\ @span),
-    do: %Binary{op: op, left: to_node(l), right: to_node(r), span: span}
+  defp bin(op, l, r, span \\ @span), do: %Binary{op: op, left: to_node(l), right: to_node(r), span: span}
 
   defp unary(op, e, span \\ @span), do: %Unary{op: op, expr: to_node(e), span: span}
 

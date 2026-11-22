@@ -1,9 +1,5 @@
 defmodule Loxe.ParserTest do
   use ExUnit.Case, async: true
-  doctest Loxe.Parser
-
-  alias Loxe.{Lexer, Parser, Span}
-  alias Loxe.Parser.Error
 
   alias Loxe.Ast.{
     Assign,
@@ -28,6 +24,11 @@ defmodule Loxe.ParserTest do
     VarDecl,
     While
   }
+
+  alias Loxe.{Lexer, Parser, Span}
+  alias Loxe.Parser.Error
+
+  doctest Loxe.Parser
 
   defp parse(src) do
     {:ok, tokens} = Lexer.lex(src, 0)
@@ -61,8 +62,7 @@ defmodule Loxe.ParserTest do
   defp to_sexp(%Assign{name: name, value: v}), do: "(= #{name} #{to_sexp(v)})"
   defp to_sexp(%Get{object: o, name: n}), do: "(get #{to_sexp(o)} #{n.name})"
 
-  defp to_sexp(%Set{object: o, name: n, value: v}),
-    do: "(set #{to_sexp(o)} #{n.name} #{to_sexp(v)})"
+  defp to_sexp(%Set{object: o, name: n, value: v}), do: "(set #{to_sexp(o)} #{n.name} #{to_sexp(v)})"
 
   defp to_sexp(%Call{callee: c, args: args}) do
     "(call #{Enum.map_join([c | args], " ", &to_sexp/1)})"

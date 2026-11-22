@@ -38,7 +38,7 @@ defmodule Loxe.Interpreter.Env do
 
       _ ->
         if Map.has_key?(state.globals, name),
-          do: %State{state | globals: Map.put(state.globals, name, value)},
+          do: %{state | globals: Map.put(state.globals, name, value)},
           else: raise(Error, kind: {:undefined_variable, name}, span: span)
     end
   end

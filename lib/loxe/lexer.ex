@@ -45,6 +45,9 @@ defmodule Loxe.Lexer do
     * `{:invalid_number, literal}` - a number too large for a float.
   """
 
+  alias __MODULE__.Error
+  alias Loxe.Span
+
   defmodule Error do
     @moduledoc """
     Returned by `Loxe.Lexer.lex/2` when the source can't be lexed.
@@ -80,9 +83,6 @@ defmodule Loxe.Lexer do
 
     defp describe({:invalid_number, num}), do: "number literal is invalid: #{inspect(num)}"
   end
-
-  alias __MODULE__.Error
-  alias Loxe.Span
 
   @type tokenkind ::
           :lparen

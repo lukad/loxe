@@ -9,9 +9,9 @@ defmodule Loxe.Interpreter.State do
   The other fields are internal.
   """
 
-  defstruct globals: %{}, heap: %{}, next_ref: 0, out: :stdio
-
   alias Loxe.Interpreter
+
+  defstruct globals: %{}, heap: %{}, next_ref: 0, out: :stdio
 
   @type t() :: %__MODULE__{
           globals: %{String.t() => Interpreter.value()},

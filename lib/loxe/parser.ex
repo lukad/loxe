@@ -44,8 +44,6 @@ defmodule Loxe.Parser do
   parenthesized target such as `(a) = 1` is an error.
   """
 
-  alias Loxe.Lexer
-  alias Loxe.Span
   alias Loxe.Ast
 
   alias Loxe.Ast.{
@@ -71,6 +69,9 @@ defmodule Loxe.Parser do
     VarDecl,
     While
   }
+
+  alias Loxe.Lexer
+  alias Loxe.Span
 
   defmodule Error do
     @moduledoc """
@@ -183,8 +184,7 @@ defmodule Loxe.Parser do
   defp parse_var([{:var, _, start} | rest]) do
     with {:ok, name, rest} <- parse_ident(rest),
          {:ok, value, rest} <- parse_initializer(rest) do
-      {:ok, %VarDecl{name: name, value: value, span: Span.join(start, (value || name).span)},
-       rest}
+      {:ok, %VarDecl{name: name, value: value, span: Span.join(start, (value || name).span)}, rest}
     end
   end
 
@@ -194,7 +194,7 @@ defmodule Loxe.Parser do
   defp parse_fun_decl([{:fun, _, start_span} | rest]) do
     with {:ok, %Fun{} = fun, rest} <- parse_fun(rest, true) do
       span = Span.join(start_span, fun.span)
-      fun = %Fun{fun | span: span}
+      fun = %{fun | span: span}
       {:ok, fun, rest}
     end
   end
@@ -212,25 +212,9 @@ defmodule Loxe.Parser do
   defp maybe_params(tokens, false), do: {:ok, [], tokens}
 
   defp parse_params(tokens) do
-    with {:ok, _, rest} <- expect(tokens, :lparen) do
-      case rest do
-        [{:rparen, _, _} | rest] -> {:ok, [], rest}
-        _ -> parse_param_list(rest, [])
-      end
-    end
-  end
-
-  defp parse_param_list(tokens, acc) do
-    with {:ok, param, rest} <- parse_ident(tokens) do
-      case rest do
-        [{:comma, _, _} | rest] ->
-          parse_param_list(rest, [param | acc])
-
-        _ ->
-          with {:ok, _, rest} <- expect(rest, :rparen) do
-            {:ok, Enum.reverse([param | acc]), rest}
-          end
-      end
+    with {:ok, _, rest} <- expect(tokens, :lparen),
+         {:ok, params, _stop, rest} <- parse_list(rest, &parse_ident/1) do
+      {:ok, params, rest}
     end
   end
 
@@ -385,7 +369,7 @@ defmodule Loxe.Parser do
 
   # Call: `callee(args)`
   defp led(lhs, [{:lparen, _, _} | rest], min_bp) when min_bp <= 90 do
-    with {:ok, {args, stop}, rest} <- parse_args(rest) do
+    with {:ok, args, stop, rest} <- parse_args(rest) do
       call = %Call{callee: lhs, args: args, span: Span.join(lhs.span, stop)}
       led(call, rest, min_bp)
     end
@@ -434,22 +418,7 @@ defmodule Loxe.Parser do
   defp infix(:slash), do: {:div, 60, 61}
   defp infix(_), do: nil
 
-  defp parse_args([{:rparen, _, stop} | rest]), do: {:ok, {[], stop}, rest}
-  defp parse_args(tokens), do: parse_arg_list(tokens, [])
-
-  defp parse_arg_list(tokens, acc) do
-    with {:ok, arg, rest} <- parse_expr(tokens) do
-      case rest do
-        [{:comma, _, _} | rest] ->
-          parse_arg_list(rest, [arg | acc])
-
-        _ ->
-          with {:ok, stop, rest} <- expect(rest, :rparen) do
-            {:ok, {Enum.reverse([arg | acc]), stop}, rest}
-          end
-      end
-    end
-  end
+  defp parse_args(tokens), do: parse_list(tokens, &parse_expr/1)
 
   defp to_assignment(%Var{name: name} = target, value) do
     {:ok, %Assign{name: name, value: value, span: Span.join(target.span, value.span)}}
@@ -476,5 +445,24 @@ defmodule Loxe.Parser do
 
   defp expect([{found, _, span} | _], expected) do
     {:error, %Error{kind: {:expected, expected, found}, span: span}}
+  end
+
+  defp parse_list([{:rparen, _, stop} | rest], _parse), do: {:ok, [], stop, rest}
+  defp parse_list(tokens, parse), do: parse_items(tokens, parse, [])
+
+  defp parse_items(tokens, parse, acc) do
+    with {:ok, item, rest} <- parse.(tokens) do
+      continue_list(rest, parse, [item | acc])
+    end
+  end
+
+  defp continue_list([{:comma, _, _} | rest], parse, acc) do
+    parse_items(rest, parse, acc)
+  end
+
+  defp continue_list(tokens, _parse, acc) do
+    with {:ok, stop, rest} <- expect(tokens, :rparen) do
+      {:ok, Enum.reverse(acc), stop, rest}
+    end
   end
 end
