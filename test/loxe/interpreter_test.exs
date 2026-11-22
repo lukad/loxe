@@ -488,6 +488,154 @@ defmodule Loxe.InterpreterTest do
     end
   end
 
+  describe "while" do
+    test "runs the body while the condition is truthy" do
+      assert output("var i = 0; while (i < 3) { print i; i = i + 1; }") == "0\n1\n2\n"
+    end
+
+    test "never runs the body if the condition starts false" do
+      assert output("while (false) print 1; print 2;") == "2\n"
+    end
+
+    test "the condition is evaluated before each iteration" do
+      assert output("var i = 0; while ((i = i + 1) < 3) print i; print i;") == "1\n2\n3\n"
+    end
+
+    test "each iteration gets a fresh block scope" do
+      src = "var i = 0; while (i < 2) { var x; print x; x = i; i = i + 1; }"
+      assert output(src) == "nil\nnil\n"
+    end
+
+    test "body locals are not visible after the loop" do
+      assert %Error{kind: {:undefined_variable, "x"}} =
+               run_error("var i = 0; while (i < 1) { var x = 1; i = i + 1; } print x;")
+    end
+
+    test "an error in the body stops the loop" do
+      {:ok, io} = StringIO.open("")
+      decls = parse!(~s|var i = 0; while (true) { print i; i = i + 1; if (i == 2) -"a"; }|)
+
+      assert {:error, %Error{kind: {:invalid_operand, :neg}}} =
+               Interpreter.run(decls, %State{out: io})
+
+      assert StringIO.contents(io) == {"", "0\n1\n"}
+    end
+
+    test "many iterations" do
+      src = "var i = 0; while (i < 100000) i = i + 1; print i;"
+      assert output(src) == "100000\n"
+    end
+  end
+
+  describe "break" do
+    test "leaves the loop" do
+      assert output("while (true) { print 1; break; print 2; } print 3;") == "1\n3\n"
+    end
+
+    test "from inside an if" do
+      src = "var i = 0; while (true) { if (i == 2) break; print i; i = i + 1; }"
+      assert output(src) == "0\n1\n"
+    end
+
+    test "from a nested block" do
+      assert output("while (true) { { { break; } } print 1; } print 2;") == "2\n"
+    end
+
+    test "only leaves the innermost loop" do
+      src = """
+      var i = 0;
+      while (i < 2) {
+        while (true) { print i; break; }
+        i = i + 1;
+      }
+      """
+
+      assert output(src) == "0\n1\n"
+    end
+
+    test "keeps changes made before it" do
+      assert output("var a = 1; while (true) { a = 2; break; } print a;") == "2\n"
+    end
+
+    test "does not leak block locals" do
+      # Regression: `break` used to carry the block's scope out of the loop.
+      assert %Error{kind: {:undefined_variable, "x"}} =
+               run_error("while (true) { var x = 1; break; } print x;")
+
+      assert output("var x = 0; { while (true) { var x = 1; break; } print x; }") == "0\n"
+    end
+
+    test "globals declared after the loop are still globals" do
+      {:ok, state} = Interpreter.run(parse!("while (true) { var x = 1; break; } var y = 2;"))
+      assert state.globals == %{"y" => 2.0}
+    end
+  end
+
+  describe "continue" do
+    test "skips the rest of the body" do
+      src = "var i = 0; while (i < 4) { i = i + 1; if (i == 2) continue; print i; }"
+      assert output(src) == "1\n3\n4\n"
+    end
+
+    test "from a nested block" do
+      src = "var i = 0; while (i < 2) { i = i + 1; { { continue; } } print i; } print 9;"
+      assert output(src) == "9\n"
+    end
+
+    test "only affects the innermost loop" do
+      src = """
+      var i = 0;
+      while (i < 2) {
+        var j = 0;
+        while (j < 2) { j = j + 1; continue; print j; }
+        print i;
+        i = i + 1;
+      }
+      """
+
+      assert output(src) == "0\n1\n"
+    end
+
+    test "re-evaluates the condition" do
+      assert output("var i = 0; while (i < 3) { i = i + 1; continue; } print i;") == "3\n"
+    end
+  end
+
+  describe "break and continue outside a loop" do
+    test "at the top level" do
+      assert %Error{kind: {:outside_loop, :break}} = run_error("break;")
+      assert %Error{kind: {:outside_loop, :continue}} = run_error("continue;")
+    end
+
+    test "in a block or if" do
+      assert %Error{kind: {:outside_loop, :break}} = run_error("{ { break; } }")
+      assert %Error{kind: {:outside_loop, :continue}} = run_error("if (true) continue;")
+    end
+
+    test "after a loop" do
+      assert %Error{kind: {:outside_loop, :break}} = run_error("while (false) {} break;")
+    end
+
+    test "statements before it still run" do
+      {:ok, io} = StringIO.open("")
+
+      assert {:error, %Error{}} =
+               Interpreter.run(parse!("print 1; break; print 2;"), %State{out: io})
+
+      assert StringIO.contents(io) == {"", "1\n"}
+    end
+
+    test "span covers the statement" do
+      src = "print 1; { break; }"
+      assert run_error(src).span == %Span{source_id: 0, start: 11, end: 17}
+    end
+
+    test "messages" do
+      assert Exception.message(run_error("break;")) == "break outside a loop at 0..6"
+      assert Exception.message(run_error("continue;")) == "continue outside a loop at 0..9"
+    end
+  end
+
   describe "blocks" do
     test "run their statements in order" do
       assert output("{ print 1; print 2; }") == "1\n2\n"

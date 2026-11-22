@@ -125,11 +125,14 @@ defmodule Loxe.LexerTest do
     end
 
     test "keywords" do
-      src = "and class else fun for if or print return super this var while"
+      src =
+        "and break class continue else fun for if or print return super this var while"
 
       assert kinds(src) == [
                :and,
+               :break,
                :class,
+               :continue,
                :else,
                :fun,
                :for,

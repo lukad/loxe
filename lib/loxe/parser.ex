@@ -5,21 +5,23 @@ defmodule Loxe.Parser do
 
   ## Grammar
 
-      program     -> declaration* EOF
-      declaration -> varDecl | funDecl | statement
-      varDecl     -> "var" IDENT ( "=" expression )? ";"
-      funDecl     -> "fun" IDENT "(" ( IDENT ( "," IDENT )* )? ")" block
-      statement   -> printStmt | returnStmt | ifStmt | whileStmt | forStmt
-                   | block | exprStmt
-      printStmt   -> "print" expression ";"
-      returnStmt  -> "return" expression? ";"
-      ifStmt      -> "if" "(" expression ")" statement ( "else" statement )?
-      whileStmt   -> "while" "(" expression ")" statement
-      forStmt     -> "for" "(" forInit? ";" expression? ";" expression? ")"
-                     statement
-      forInit     -> "var" IDENT ( "=" expression )? | expression
-      block       -> "{" declaration* "}"
-      exprStmt    -> expression ";"
+      program      -> declaration* EOF
+      declaration  -> varDecl | funDecl | statement
+      varDecl      -> "var" IDENT ( "=" expression )? ";"
+      funDecl      -> "fun" IDENT "(" ( IDENT ( "," IDENT )* )? ")" block
+      statement    -> printStmt | returnStmt | breakStmt | continueStmt
+                    | ifStmt | whileStmt | forStmt | block | exprStmt
+      printStmt    -> "print" expression ";"
+      returnStmt   -> "return" expression? ";"
+      breakStmt    -> "break" ";"
+      continueStmt -> "continue" ";"
+      ifStmt       -> "if" "(" expression ")" statement ( "else" statement )?
+      whileStmt    -> "while" "(" expression ")" statement
+      forStmt      -> "for" "(" forInit? ";" expression? ";" expression? ")"
+                      statement
+      forInit      -> "var" IDENT ( "=" expression )? | expression
+      block        -> "{" declaration* "}"
+      exprStmt     -> expression ";"
 
   ## Operators
 
@@ -52,6 +54,7 @@ defmodule Loxe.Parser do
     Block,
     Break,
     Call,
+    Continue,
     ExprStmt,
     For,
     Fun,
@@ -234,6 +237,7 @@ defmodule Loxe.Parser do
   defp parse_stmt([{:print, _, _} | _] = tokens), do: parse_print(tokens)
   defp parse_stmt([{:return, _, _} | _] = tokens), do: parse_return(tokens)
   defp parse_stmt([{:break, _, _} | _] = tokens), do: parse_break(tokens)
+  defp parse_stmt([{:continue, _, _} | _] = tokens), do: parse_continue(tokens)
   defp parse_stmt([{:if, _, _} | _] = tokens), do: parse_if(tokens)
   defp parse_stmt([{:while, _, _} | _] = tokens), do: parse_while(tokens)
   defp parse_stmt([{:for, _, _} | _] = tokens), do: parse_for(tokens)
@@ -260,6 +264,12 @@ defmodule Loxe.Parser do
   defp parse_break([{:break, _, start} | rest]) do
     with {:ok, stop, rest} <- expect(rest, :semicolon) do
       {:ok, %Break{span: Span.join(start, stop)}, rest}
+    end
+  end
+
+  defp parse_continue([{:continue, _, start} | rest]) do
+    with {:ok, stop, rest} <- expect(rest, :semicolon) do
+      {:ok, %Continue{span: Span.join(start, stop)}, rest}
     end
   end
 

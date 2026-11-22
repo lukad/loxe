@@ -14,6 +14,7 @@ defmodule Loxe.Ast do
     Break,
     Call,
     Class,
+    Continue,
     ExprStmt,
     For,
     Fun,
@@ -50,6 +51,7 @@ defmodule Loxe.Ast do
           | Print.t()
           | Return.t()
           | Break.t()
+          | Continue.t()
           | If.t()
           | While.t()
           | For.t()
@@ -234,6 +236,16 @@ defmodule Loxe.Ast do
   defmodule Break do
     @moduledoc """
     A `break` statement.
+    """
+
+    @enforce_keys [:span]
+    defstruct @enforce_keys
+    @type t :: %__MODULE__{span: Span.t()}
+  end
+
+  defmodule Continue do
+    @moduledoc """
+    A `continue` statement.
     """
 
     @enforce_keys [:span]

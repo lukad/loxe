@@ -105,7 +105,9 @@ defmodule Loxe.Lexer do
           | :less
           | :less_equal
           | :and
+          | :break
           | :class
+          | :continue
           | :else
           | :fun
           | :for
@@ -207,7 +209,9 @@ defmodule Loxe.Lexer do
 
   @keywords %{
     "and" => {:and, nil},
+    "break" => {:break, nil},
     "class" => {:class, nil},
+    "continue" => {:continue, nil},
     "else" => {:else, nil},
     "fun" => {:fun, nil},
     "false" => {:bool, false},

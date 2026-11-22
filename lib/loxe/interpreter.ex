@@ -3,8 +3,8 @@ defmodule Loxe.Interpreter do
   Runs Lox programs parsed by `Loxe.Parser`.
 
   Supported so far: expression statements, `print`, `var`, blocks, `if`,
-  and literal, grouping, variable, assignment, unary and binary
-  expressions.
+  `while`, `break`, `continue`, and literal, grouping, variable,
+  assignment, unary and binary expressions.
 
   ## Values
 
@@ -40,6 +40,10 @@ defmodule Loxe.Interpreter do
   branch, if there is one, otherwise. The branch that isn't taken is never
   evaluated.
 
+  `while` evaluates its condition before each iteration and runs the body
+  while it is truthy. `break` leaves the innermost loop, and `continue`
+  skips to its next iteration. Using either outside a loop is an error.
+
   ## Output
 
   `print` writes the value and a newline to `state.out` (see
@@ -57,6 +61,8 @@ defmodule Loxe.Interpreter do
     Assign,
     Block,
     Binary,
+    Break,
+    Continue,
     ExprStmt,
     Grouping,
     Ident,
@@ -65,7 +71,8 @@ defmodule Loxe.Interpreter do
     Print,
     Unary,
     Var,
-    VarDecl
+    VarDecl,
+    While
   }
 
   @typedoc "A Lox value."
@@ -101,8 +108,13 @@ defmodule Loxe.Interpreter do
   """
   @spec run([Ast.decl()], State.t()) :: {:ok, State.t()} | {:error, Error.t()}
   def run(decls, state \\ %State{}) do
-    {:ok, :global, state} = exec_all(decls, :global, state)
-    {:ok, state}
+    case exec_all(decls, :global, state) do
+      {:ok, :global, state} ->
+        {:ok, state}
+
+      {{kind, span}, _env, _state} when kind in [:break, :continue] ->
+        {:error, %Error{kind: {:outside_loop, kind}, span: span}}
+    end
   rescue
     error in Error -> {:error, error}
   end
@@ -134,10 +146,8 @@ defmodule Loxe.Interpreter do
   end
 
   defp exec(%Block{body: decls}, env, state) do
-    case exec_all(decls, Env.scope(env), state) do
-      {:ok, _inner, state} -> {:ok, env, state}
-      other -> other
-    end
+    {tag, _inner, state} = exec_all(decls, Env.scope(env), state)
+    {tag, env, state}
   end
 
   defp exec(%If{} = stmt, env, state) do
@@ -149,6 +159,29 @@ defmodule Loxe.Interpreter do
     else
       {:ok, env, state}
     end
+  end
+
+  defp exec(%While{} = loop, env, state) do
+    {value, env, state} = eval(loop.condition, env, state)
+
+    if truthy?(value) do
+      case exec(loop.body, env, state) do
+        {:ok, env, state} -> exec(loop, env, state)
+        {{:continue, _}, env, state} -> exec(loop, env, state)
+        {{:break, _}, env, state} -> {:ok, env, state}
+        other -> other
+      end
+    else
+      {:ok, env, state}
+    end
+  end
+
+  defp exec(%Break{span: span}, env, state) do
+    {{:break, span}, env, state}
+  end
+
+  defp exec(%Continue{span: span}, env, state) do
+    {{:continue, span}, env, state}
   end
 
   @spec eval(Ast.expr(), Env.t(), State.t()) :: {value(), Env.t(), State.t()}

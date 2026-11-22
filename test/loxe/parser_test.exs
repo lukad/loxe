@@ -9,7 +9,9 @@ defmodule Loxe.ParserTest do
     Assign,
     Binary,
     Block,
+    Break,
     Call,
+    Continue,
     ExprStmt,
     For,
     Fun,
@@ -279,6 +281,11 @@ defmodule Loxe.ParserTest do
                parse!("if (a) print 1; else if (b) print 2; else print 3;")
     end
 
+    test "break and continue" do
+      assert [%While{body: %Block{body: [%Break{}, %Continue{}]}}] =
+               parse!("while (x) { break; continue; }")
+    end
+
     test "while" do
       assert [%While{condition: %Binary{op: :lt}, body: %Block{}}] = parse!("while (i < 10) {}")
     end
@@ -403,6 +410,13 @@ defmodule Loxe.ParserTest do
       assert span == span(src, src)
     end
 
+    test "break and continue spans include the semicolon" do
+      src = "break; continue;"
+      assert [%Break{span: break_span}, %Continue{span: continue_span}] = parse!(src)
+      assert break_span == span(src, "break;")
+      assert continue_span == span(src, "continue;")
+    end
+
     test "loop spans end at the end of the body" do
       for src <- ["while (x) { }", "for (;;) print 1;"] do
         assert [%{span: span}] = parse!(src)
@@ -472,6 +486,11 @@ defmodule Loxe.ParserTest do
 
     test "property access without a name" do
       assert %Error{kind: {:expected, :ident, :semicolon}} = error("a.;")
+    end
+
+    test "break and continue without a semicolon" do
+      assert %Error{kind: {:expected, :semicolon, :rbrace}} = error("while (x) { break }")
+      assert %Error{kind: {:expected, :semicolon, :eof}} = error("continue")
     end
 
     test "parsing stops at the first error" do

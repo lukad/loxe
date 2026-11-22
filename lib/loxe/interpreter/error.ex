@@ -13,6 +13,9 @@ defmodule Loxe.Interpreter.Error do
       float, such as multiplying the largest float by 10.
     * `{:undefined_variable, name}` - a variable was read or assigned but
       never declared. `span` covers the variable or the assignment.
+    * `{:outside_loop, keyword}` - a `break` or `continue` statement ran
+      outside a loop. `keyword` is `:break` or `:continue`, and `span`
+      covers the statement.
   """
 
   defexception [:kind, :span]
@@ -23,7 +26,8 @@ defmodule Loxe.Interpreter.Error do
             | {:invalid_operand, Loxe.Ast.unary_op()}
             | :division_by_zero
             | :overflow
-            | {:undefined_variable, String.t()},
+            | {:undefined_variable, String.t()}
+            | {:outside_loop, :break | :continue},
           span: Loxe.Span.t()
         }
 
@@ -37,6 +41,7 @@ defmodule Loxe.Interpreter.Error do
   defp describe(:division_by_zero), do: "division by zero"
   defp describe(:overflow), do: "overflow"
   defp describe({:undefined_variable, name}), do: "undefined variable #{name}"
+  defp describe({:outside_loop, keyword}), do: "#{keyword} outside a loop"
 
   defp binary_symbol(:or), do: "or"
   defp binary_symbol(:and), do: "and"
