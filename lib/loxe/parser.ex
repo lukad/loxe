@@ -40,7 +40,7 @@ defmodule Loxe.Parser do
   The target of `=` must be a variable or a property access. `a = 1`
   becomes `Loxe.Ast.Assign` and `a.b = 1` becomes `Loxe.Ast.Set`.
   There is no node for parentheses: `(1 + 2)` parses to a
-  `Loxe.Ast.Binary`.
+  `Loxe.Ast.Binary` whose span includes the parentheses.
   """
 
   alias Loxe.Lexer
@@ -362,10 +362,10 @@ defmodule Loxe.Parser do
     end
   end
 
-  defp nud([{:lparen, _, _} | rest]) do
+  defp nud([{:lparen, _, start} | rest]) do
     with {:ok, expr, rest} <- expr_bp(rest, 0),
-         {:ok, _, rest} <- expect(rest, :rparen) do
-      {:ok, expr, rest}
+         {:ok, stop, rest} <- expect(rest, :rparen) do
+      {:ok, %{expr | span: Span.join(start, stop)}, rest}
     end
   end
 
@@ -415,9 +415,9 @@ defmodule Loxe.Parser do
   defp infix(:equal_equal), do: {:eq, 40, 41}
   defp infix(:bang_equal), do: {:ne, 40, 41}
   defp infix(:less), do: {:lt, 45, 46}
-  defp infix(:less_equal), do: {:lt, 45, 46}
-  defp infix(:greater), do: {:lt, 45, 46}
-  defp infix(:greater_equal), do: {:lt, 45, 46}
+  defp infix(:less_equal), do: {:le, 45, 46}
+  defp infix(:greater), do: {:gt, 45, 46}
+  defp infix(:greater_equal), do: {:ge, 45, 46}
   defp infix(:plus), do: {:add, 50, 51}
   defp infix(:minus), do: {:sub, 50, 51}
   defp infix(:star), do: {:mul, 60, 61}

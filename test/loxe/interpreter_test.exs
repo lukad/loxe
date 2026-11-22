@@ -282,6 +282,14 @@ defmodule Loxe.InterpreterTest do
       assert run(~s("a" + "b" + "c")) == "abc"
     end
 
+    test "comparison" do
+      assert run("1 < 2") == true
+      assert run("2 <= 2") == true
+      assert run("1 > 2") == false
+      assert run("2 >= 3") == false
+      assert run("1 + 1 >= 2 == true") == true
+    end
+
     test "equality and logic" do
       assert run("1 + 1 == 2") == true
       assert run(~s(nil or "default")) == "default"
@@ -291,7 +299,9 @@ defmodule Loxe.InterpreterTest do
     test "error span points at the source" do
       src = ~s|print 1 + (2 * "x");|
       error = run_error(src)
-      assert binary_part(src, error.span.start, error.span.end - error.span.start) == ~s(2 * "x")
+
+      assert binary_part(src, error.span.start, error.span.end - error.span.start) ==
+               ~s|(2 * "x")|
     end
   end
 
