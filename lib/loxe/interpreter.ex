@@ -2,8 +2,9 @@ defmodule Loxe.Interpreter do
   @moduledoc """
   Runs Lox programs parsed by `Loxe.Parser`.
 
-  Supported so far: expression statements, `print`, `var`, blocks, and
-  literal, grouping, variable, assignment, unary and binary expressions.
+  Supported so far: expression statements, `print`, `var`, blocks, `if`,
+  and literal, grouping, variable, assignment, unary and binary
+  expressions.
 
   ## Values
 
@@ -33,6 +34,12 @@ defmodule Loxe.Interpreter do
   Assignment is an expression that returns the assigned value, so
   `a = b = 1` sets both.
 
+  ## Control flow
+
+  `if` runs its then branch when the condition is truthy, and its `else`
+  branch, if there is one, otherwise. The branch that isn't taken is never
+  evaluated.
+
   ## Output
 
   `print` writes the value and a newline to `state.out` (see
@@ -53,6 +60,7 @@ defmodule Loxe.Interpreter do
     ExprStmt,
     Grouping,
     Ident,
+    If,
     Literal,
     Print,
     Unary,
@@ -129,6 +137,17 @@ defmodule Loxe.Interpreter do
     case exec_all(decls, Env.scope(env), state) do
       {:ok, _inner, state} -> {:ok, env, state}
       other -> other
+    end
+  end
+
+  defp exec(%If{} = stmt, env, state) do
+    {condition, env, state} = eval(stmt.condition, env, state)
+    branch = if truthy?(condition), do: stmt.then_branch, else: stmt.else_branch
+
+    if branch do
+      exec(branch, env, state)
+    else
+      {:ok, env, state}
     end
   end
 

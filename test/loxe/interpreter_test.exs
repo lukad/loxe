@@ -415,6 +415,79 @@ defmodule Loxe.InterpreterTest do
     end
   end
 
+  describe "if" do
+    test "runs the then branch when the condition is true" do
+      assert output("if (true) print 1; else print 2;") == "1\n"
+    end
+
+    test "runs the else branch when the condition is false" do
+      assert output("if (false) print 1; else print 2;") == "2\n"
+    end
+
+    test "does nothing when the condition is false and there is no else" do
+      assert output("if (false) print 1; print 2;") == "2\n"
+    end
+
+    test "falsy conditions" do
+      for condition <- ["nil", "false"] do
+        assert output("if (#{condition}) print 1; else print 2;") == "2\n", condition
+      end
+    end
+
+    test "truthy conditions" do
+      for condition <- ["true", "0", ~s(""), ~s("a"), "1 - 1"] do
+        assert output("if (#{condition}) print 1; else print 2;") == "1\n", condition
+      end
+    end
+
+    test "condition with logical operators" do
+      assert output(~s|if (nil or "x") print 1;|) == "1\n"
+      assert output("if (true and nil) print 1; else print 2;") == "2\n"
+    end
+
+    test "the condition is evaluated once" do
+      assert output("var a = 0; if (a = a + 1) print a; print a;") == "1\n1\n"
+    end
+
+    test "the branch not taken is not evaluated" do
+      assert output(~s|if (true) print 1; else print -"a";|) == "1\n"
+      assert output(~s|if (false) print -"a"; else print 2;|) == "2\n"
+    end
+
+    test "else belongs to the nearest if" do
+      assert output("if (true) if (false) print 1; else print 2;") == "2\n"
+      assert output("if (false) if (true) print 1; else print 2;") == ""
+    end
+
+    test "else if chains" do
+      src = fn n ->
+        "var n = #{n}; if (n == 1) print 1; else if (n == 2) print 2; else print 3;"
+      end
+
+      assert output(src.(1)) == "1\n"
+      assert output(src.(2)) == "2\n"
+      assert output(src.(5)) == "3\n"
+    end
+
+    test "branches can assign outer variables" do
+      assert output("var a = 1; if (true) a = 2; print a;") == "2\n"
+      assert output("{ var a = 1; if (false) {} else { a = 3; } print a; }") == "3\n"
+    end
+
+    test "a block branch has its own scope" do
+      assert %Error{kind: {:undefined_variable, "a"}} =
+               run_error("if (true) { var a = 1; } print a;")
+    end
+
+    test "an error in the condition is returned" do
+      assert %Error{kind: {:invalid_operand, :neg}} = run_error(~s|if (-"a") print 1;|)
+    end
+
+    test "an error in the taken branch is returned" do
+      assert %Error{kind: :division_by_zero} = run_error("if (true) print 1 / 0;")
+    end
+  end
+
   describe "blocks" do
     test "run their statements in order" do
       assert output("{ print 1; print 2; }") == "1\n2\n"
