@@ -1122,6 +1122,70 @@ defmodule Loxe.InterpreterTest do
     end
   end
 
+  describe "anonymous functions" do
+    test "stored in a variable" do
+      assert output("var f = fun (a) { return a + 1; }; print f(1);") == "2\n"
+    end
+
+    test "called right away" do
+      assert output("print fun (a) { return a * 2; }(3);") == "6\n"
+      assert output("fun () { print 1; }();") == "1\n"
+    end
+
+    test "do nothing until called" do
+      {:ok, io} = StringIO.open("")
+      assert {:ok, state} = Interpreter.run(parse!("fun () { print 1; };"), %State{out: io})
+      assert state.globals == %{}
+      assert StringIO.contents(io) == {"", ""}
+    end
+
+    test "as an argument" do
+      src = "fun twice(f, x) { return f(f(x)); } print twice(fun (n) { return n * 2; }, 3);"
+      assert output(src) == "12\n"
+    end
+
+    test "as a return value" do
+      src = """
+      fun make_counter() {
+        var i = 0;
+        return fun () { i = i + 1; return i; };
+      }
+      var count = make_counter();
+      print count(); print count();
+      """
+
+      assert output(src) == "1\n2\n"
+    end
+
+    test "are closures" do
+      assert output("{ var a = 1; var get = fun () { return a; }; a = 2; print get(); }") == "2\n"
+    end
+
+    test "recursion through a global variable" do
+      src = "var fact = fun (n) { if (n <= 1) return 1; return n * fact(n - 1); }; print fact(5);"
+      assert output(src) == "120\n"
+    end
+
+    test "cannot refer to a local variable they initialize" do
+      assert %Error{kind: {:undefined_variable, "f"}} =
+               run_error("{ var f = fun () { return f; }; f(); }")
+    end
+
+    test "wrong number of arguments" do
+      assert %Error{kind: {:arity, 1, 0}} = run_error("var f = fun (a) {}; f();")
+    end
+
+    test "break outside a loop in the body" do
+      assert %Error{kind: {:outside_loop, :break}} =
+               run_error("while (true) { fun () { break; }(); }")
+    end
+
+    test "printing" do
+      assert output("print fun () {};") == "<fun>\n"
+      assert output("fun f() {} print f; var g = f; print g;") == "<fun f>\n<fun f>\n"
+    end
+  end
+
   describe "blocks" do
     test "run their statements in order" do
       assert output("{ print 1; print 2; }") == "1\n2\n"

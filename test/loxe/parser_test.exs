@@ -15,6 +15,7 @@ defmodule Loxe.ParserTest do
     Grouping,
     Ident,
     If,
+    Lambda,
     Literal,
     Print,
     Return,
@@ -63,6 +64,8 @@ defmodule Loxe.ParserTest do
   defp to_sexp(%Get{object: o, name: n}), do: "(get #{to_sexp(o)} #{n.name})"
 
   defp to_sexp(%Set{object: o, name: n, value: v}), do: "(set #{to_sexp(o)} #{n.name} #{to_sexp(v)})"
+
+  defp to_sexp(%Lambda{params: params}), do: Enum.join(["(fun" | Enum.map(params, & &1.name)], " ") <> ")"
 
   defp to_sexp(%Call{callee: c, args: args}) do
     "(call #{Enum.map_join([c | args], " ", &to_sexp/1)})"
@@ -193,6 +196,42 @@ defmodule Loxe.ParserTest do
 
     test "property access on a grouped expression" do
       assert sexp("(a + b).c") == "(get (group (add a b)) c)"
+    end
+  end
+
+  describe "anonymous functions" do
+    test "without parameters" do
+      assert [%VarDecl{value: %Lambda{params: [], body: %Block{body: []}}}] =
+               parse!("var f = fun () {};")
+    end
+
+    test "with parameters" do
+      assert [%VarDecl{value: %Lambda{params: params, body: %Block{body: [%Return{}]}}}] =
+               parse!("var f = fun (a, b) { return a + b; };")
+
+      assert Enum.map(params, & &1.name) == ["a", "b"]
+    end
+
+    test "as an argument" do
+      assert sexp("f(fun (a) {}, b)") == "(call f (fun a) b)"
+    end
+
+    test "followed by a call or property access" do
+      assert sexp("fun () {}()") == "(call (fun))"
+      assert sexp("fun (a) {}.b") == "(get (fun a) b)"
+    end
+
+    test "in a binary expression" do
+      assert sexp("fun () {} == nil") == "(eq (fun) nil)"
+    end
+
+    test "a statement that starts with fun ( is an expression statement" do
+      assert [%ExprStmt{expr: %Lambda{}}] = parse!("fun () {};")
+      assert [%ExprStmt{expr: %Call{callee: %Lambda{}}}] = parse!("fun () {}();")
+    end
+
+    test "fun followed by a name is still a declaration" do
+      assert [%Fun{name: %Ident{name: "f"}}] = parse!("fun f() {}")
     end
   end
 
@@ -404,6 +443,12 @@ defmodule Loxe.ParserTest do
       assert body.span == span(src, "{ print a; }")
     end
 
+    test "anonymous function span runs from fun to the closing brace" do
+      src = "var f = fun (a) { print a; };"
+      assert [%VarDecl{value: %Lambda{span: span}}] = parse!(src)
+      assert span == span(src, "fun (a) { print a; }")
+    end
+
     test "if span ends at the end of the else branch" do
       src = "if (x) print 1; else print 2;"
       assert [%If{span: span}] = parse!(src)
@@ -482,6 +527,26 @@ defmodule Loxe.ParserTest do
 
     test "function without a body" do
       assert %Error{kind: {:expected, :lbrace, :semicolon}} = error("fun f();")
+    end
+
+    test "function declaration without a name" do
+      assert %Error{kind: {:expected, :ident, :number}} = error("fun 1() {}")
+    end
+
+    test "anonymous function without a parameter list" do
+      assert %Error{kind: {:expected_expression, :fun}} = error("var f = fun {};")
+    end
+
+    test "anonymous function with a name" do
+      assert %Error{kind: {:expected_expression, :fun}} = error("var f = fun g() {};")
+    end
+
+    test "anonymous function without a body" do
+      assert %Error{kind: {:expected, :lbrace, :semicolon}} = error("var f = fun ();")
+    end
+
+    test "anonymous function statement without a semicolon" do
+      assert %Error{kind: {:expected, :semicolon, :eof}} = error("fun () {}")
     end
 
     test "property access without a name" do

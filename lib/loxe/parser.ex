@@ -42,6 +42,13 @@ defmodule Loxe.Parser do
   The target of `=` must be a variable or a property access. `a = 1`
   becomes `Loxe.Ast.Assign` and `a.b = 1` becomes `Loxe.Ast.Set`. A
   parenthesized target such as `(a) = 1` is an error.
+
+  ## Anonymous functions
+
+  `fun (params) { body }` is an expression and becomes `Loxe.Ast.Lambda`.
+  It can appear anywhere a literal can, so `fun (a) { return a; }(1)`
+  calls it right away. A statement that starts with `fun (` is an expression statement,
+  not a function declaration.
   """
 
   alias Loxe.Ast
@@ -70,6 +77,7 @@ defmodule Loxe.Parser do
     While
   }
 
+  alias Loxe.Ast.Lambda
   alias Loxe.Lexer
   alias Loxe.Span
 
@@ -170,6 +178,7 @@ defmodule Loxe.Parser do
   end
 
   defp parse_decl([{:var, _, _} | _] = tokens), do: parse_var_decl(tokens)
+  defp parse_decl([{:fun, _, _}, {:lparen, _, _} | _] = tokens), do: parse_stmt(tokens)
   defp parse_decl([{:fun, _, _} | _] = tokens), do: parse_fun_decl(tokens)
   defp parse_decl([{:class, _, _} | _] = _tokens), do: raise("Not implemented")
   defp parse_decl(tokens), do: parse_stmt(tokens)
@@ -348,6 +357,13 @@ defmodule Loxe.Parser do
 
   defp nud([{:ident, name, span} | rest]) do
     {:ok, %Var{name: name, span: span}, rest}
+  end
+
+  defp nud([{:fun, _, start} | [{:lparen, _, _} | _] = rest]) do
+    with {:ok, params, rest} <- parse_params(rest),
+         {:ok, body, rest} <- parse_block(rest) do
+      {:ok, %Lambda{params: params, body: body, span: Span.join(start, body.span)}, rest}
+    end
   end
 
   defp nud([{:minus, _, start} | rest]) do

@@ -19,6 +19,7 @@ defmodule Loxe.Ast do
     Get,
     Grouping,
     If,
+    Lambda,
     Literal,
     Print,
     Return,
@@ -37,6 +38,7 @@ defmodule Loxe.Ast do
           Literal.t()
           | Grouping.t()
           | Var.t()
+          | Lambda.t()
           | This.t()
           | Super.t()
           | Unary.t()
@@ -106,6 +108,18 @@ defmodule Loxe.Ast do
     @enforce_keys [:name, :span]
     defstruct @enforce_keys
     @type t :: %__MODULE__{name: String.t(), span: Span.t()}
+  end
+
+  defmodule Lambda do
+    @moduledoc """
+    An anonymous function, such as `fun (a) { return a; }`.
+    """
+
+    alias Loxe.Ast.{Block, Ident}
+
+    @enforce_keys [:params, :body, :span]
+    defstruct @enforce_keys
+    @type t :: %__MODULE__{params: [Ident.t()], body: Block.t(), span: Span.t()}
   end
 
   defmodule This do

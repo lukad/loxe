@@ -75,12 +75,20 @@ defmodule Loxe.Interpreter do
   when they're used, so top-level functions can call functions declared
   after them.
 
+  `fun (params) { body }` is an anonymous function. It evaluates to a
+  function without declaring a name, and otherwise works like a declared
+  one. It can only call itself through a variable that holds it. That
+  works for a global, as in `var f = fun () { f(); };`, but not for a
+  local, because the function captures its scope before the variable is
+  declared.
+
   ## Output
 
   `print` writes the value and a newline to `state.out` (see
   `Loxe.Interpreter.State`). Numbers with no fractional part are printed
   without a decimal point, so `print 3;` prints `3`. Strings are printed
-  without quotes.
+  without quotes. Functions are printed as `<fun name>`, or `<fun>` if
+  they're anonymous.
   """
 
   alias Loxe.Ast
@@ -106,6 +114,7 @@ defmodule Loxe.Interpreter do
     While
   }
 
+  alias Loxe.Ast.Lambda
   alias Loxe.Ast.Return
   alias Loxe.Interpreter.Closure
   alias Loxe.Interpreter.Env
@@ -246,6 +255,10 @@ defmodule Loxe.Interpreter do
     {value, env, state}
   end
 
+  defp eval(%Lambda{} = fun, env, state) do
+    {%Closure{fun: fun, env: env}, env, state}
+  end
+
   defp eval(%Call{} = call, env, state) do
     {fun, env, state} = eval(call.callee, env, state)
 
@@ -331,6 +344,7 @@ defmodule Loxe.Interpreter do
   defp stringify(n) when is_float(n), do: Float.to_string(n)
   defp stringify(s) when is_binary(s), do: s
   defp stringify(%Closure{fun: %Fun{name: %Ident{name: name}}}), do: "<fun #{name}>"
+  defp stringify(%Closure{fun: %Lambda{}}), do: "<fun>"
 
   defp loop(condition, body, update, env, state) do
     {value, env, state} =
