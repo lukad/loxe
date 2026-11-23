@@ -339,6 +339,7 @@ defmodule Loxe.Ast do
     A function declaration.
     """
 
+    alias Loxe.Ast.Block
     alias Loxe.Ast.Ident
 
     @enforce_keys [:name, :params, :body, :span]
@@ -347,7 +348,7 @@ defmodule Loxe.Ast do
     @type t :: %__MODULE__{
             name: Ident.t(),
             params: [Ident.t()],
-            body: [Loxe.Ast.decl()],
+            body: Block.t(),
             span: Span.t()
           }
   end

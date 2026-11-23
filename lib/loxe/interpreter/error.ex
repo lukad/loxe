@@ -16,6 +16,12 @@ defmodule Loxe.Interpreter.Error do
     * `{:outside_loop, keyword}` - a `break` or `continue` statement ran
       outside a loop. `keyword` is `:break` or `:continue`, and `span`
       covers the statement.
+    * `:not_callable` - something other than a function was called, such
+      as `"a"()`. `span` covers the call.
+    * `{:arity, expected, got}` - a function that takes `expected`
+      arguments was called with `got`. `span` covers the call.
+    * `:outside_function` - a `return` statement ran outside a function.
+      `span` covers the statement.
   """
 
   defexception [:kind, :span]
@@ -27,7 +33,10 @@ defmodule Loxe.Interpreter.Error do
             | :division_by_zero
             | :overflow
             | {:undefined_variable, String.t()}
-            | {:outside_loop, :break | :continue},
+            | {:outside_loop, :break | :continue}
+            | :not_callable
+            | {:arity, non_neg_integer(), non_neg_integer()}
+            | :outside_function,
           span: Loxe.Span.t()
         }
 
@@ -42,6 +51,12 @@ defmodule Loxe.Interpreter.Error do
   defp describe(:overflow), do: "overflow"
   defp describe({:undefined_variable, name}), do: "undefined variable #{name}"
   defp describe({:outside_loop, keyword}), do: "#{keyword} outside a loop"
+  defp describe(:not_callable), do: "can only call functions"
+  defp describe({:arity, expected, got}), do: "expected #{arguments(expected)} but got #{got}"
+  defp describe(:outside_function), do: "return outside a function"
+
+  defp arguments(1), do: "1 argument"
+  defp arguments(n), do: "#{n} arguments"
 
   defp binary_symbol(:or), do: "or"
   defp binary_symbol(:and), do: "and"

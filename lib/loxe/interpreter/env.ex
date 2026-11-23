@@ -10,8 +10,9 @@ defmodule Loxe.Interpreter.Env do
   def scope(:global), do: %{}
   def scope(env), do: env
 
-  def declare(name, value, :global, %State{} = state),
-    do: {:global, %{state | globals: Map.put(state.globals, name, value)}}
+  def declare(name, value, :global, %State{} = state) do
+    {:global, %{state | globals: Map.put(state.globals, name, value)}}
+  end
 
   def declare(name, value, env, %State{} = state) do
     {ref, state} = State.alloc(state, value)

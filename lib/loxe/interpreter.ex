@@ -3,13 +3,13 @@ defmodule Loxe.Interpreter do
   Runs Lox programs parsed by `Loxe.Parser`.
 
   Supported so far: expression statements, `print`, `var`, blocks, `if`,
-  `while`, `for`, `break`, `continue`, and literal, grouping, variable,
-  assignment, unary and binary expressions.
+  `while`, `for`, `break`, `continue`, functions, `return`, and literal,
+  grouping, variable, assignment, call, unary and binary expressions.
 
   ## Values
 
-  Values are `nil`, booleans, floats and strings (`t:value/0`). `nil` and
-  `false` are falsy. Everything else is truthy, including `0.0` and `""`.
+  Values are `nil`, booleans, floats, strings and functions
+  (`t:value/0`). `nil` and `false` are falsy. Everything else is truthy, including `0.0` and `""`.
 
   ## Operators
 
@@ -50,6 +50,31 @@ defmodule Loxe.Interpreter do
   a condition, the loop runs until `break`. A variable declared in `init`
   is local to the loop.
 
+  ## Functions
+
+  `fun name(params) { body }` declares a function the same way `var`
+  declares a variable, so it is a global at the top level and local in a
+  block. Functions are values: they can be assigned, passed as arguments
+  and returned.
+
+  A call evaluates the callee, then the arguments from left to right, then
+  runs the body with each parameter bound to its argument. Calling
+  something that isn't a function, or passing the wrong number of
+  arguments, is an error.
+
+  `return expr;` ends the call, and the call evaluates to `expr`. A bare
+  `return;`, or reaching the end of the body, returns `nil`. Using
+  `return` outside a function is an error. So is using `break` or
+  `continue` outside a loop in a function body, even when the function is
+  called from inside a loop.
+
+  Functions are closures: they can use the variables of the scope they
+  were declared in, even after that scope has ended, and share them with
+  it. They can't see variables declared after them in the same block, or
+  the variables of the scope they're called from. Globals are looked up
+  when they're used, so top-level functions can call functions declared
+  after them.
+
   ## Output
 
   `print` writes the value and a newline to `state.out` (see
@@ -65,9 +90,11 @@ defmodule Loxe.Interpreter do
     Binary,
     Block,
     Break,
+    Call,
     Continue,
     ExprStmt,
     For,
+    Fun,
     Grouping,
     Ident,
     If,
@@ -79,12 +106,14 @@ defmodule Loxe.Interpreter do
     While
   }
 
+  alias Loxe.Ast.Return
+  alias Loxe.Interpreter.Closure
   alias Loxe.Interpreter.Env
   alias Loxe.Interpreter.Error
   alias Loxe.Interpreter.State
 
   @typedoc "A Lox value."
-  @type value() :: nil | boolean() | float() | String.t()
+  @type value() :: nil | boolean() | float() | String.t() | Closure.t()
 
   @doc """
   Runs `decls` and returns `{:ok, state}` with the final state.
@@ -117,11 +146,8 @@ defmodule Loxe.Interpreter do
   @spec run([Ast.decl()], State.t()) :: {:ok, State.t()} | {:error, Error.t()}
   def run(decls, state \\ %State{}) do
     case exec_all(decls, :global, state) do
-      {:ok, :global, state} ->
-        {:ok, state}
-
-      {{kind, span}, _env, _state} when kind in [:break, :continue] ->
-        {:error, %Error{kind: {:outside_loop, kind}, span: span}}
+      {:ok, :global, state} -> {:ok, state}
+      {tag, _env, _state} -> stray!(tag)
     end
   rescue
     error in Error -> {:error, error}
@@ -147,9 +173,18 @@ defmodule Loxe.Interpreter do
     {:ok, env, state}
   end
 
+  # defp eval(nil, env)
+
   defp exec(%VarDecl{name: %Ident{name: n}, value: expr}, env, state) do
     {value, env, state} = if expr, do: eval(expr, env, state), else: {nil, env, state}
     {env, state} = Env.declare(n, value, env, state)
+    {:ok, env, state}
+  end
+
+  defp exec(%Fun{name: name, span: span} = fun, env, state) do
+    {env, state} = Env.declare(name.name, nil, env, state)
+    closure = %Closure{fun: fun, env: env}
+    state = Env.assign(name.name, closure, span, env, state)
     {:ok, env, state}
   end
 
@@ -201,8 +236,26 @@ defmodule Loxe.Interpreter do
     {{:continue, span}, env, state}
   end
 
+  defp exec(%Return{expr: expr, span: span}, env, state) do
+    {value, env, state} = if expr, do: eval(expr, env, state), else: {nil, env, state}
+    {{:return, value, span}, env, state}
+  end
+
   @spec eval(Ast.expr(), Env.t(), State.t()) :: {value(), Env.t(), State.t()}
   defp eval(%Literal{value: value}, env, state) do
+    {value, env, state}
+  end
+
+  defp eval(%Call{} = call, env, state) do
+    {fun, env, state} = eval(call.callee, env, state)
+
+    {args, {env, state}} =
+      Enum.map_reduce(call.args, {env, state}, fn arg, {env, state} ->
+        {value, env, state} = eval(arg, env, state)
+        {value, {env, state}}
+      end)
+
+    {value, state} = call(fun, args, call.span, state)
     {value, env, state}
   end
 
@@ -277,6 +330,7 @@ defmodule Loxe.Interpreter do
   defp stringify(n) when is_float(n) and n == trunc(n), do: Integer.to_string(trunc(n))
   defp stringify(n) when is_float(n), do: Float.to_string(n)
   defp stringify(s) when is_binary(s), do: s
+  defp stringify(%Closure{fun: %Fun{name: %Ident{name: name}}}), do: "<fun #{name}>"
 
   defp loop(condition, body, update, env, state) do
     {value, env, state} =
@@ -307,5 +361,39 @@ defmodule Loxe.Interpreter do
       end
 
     loop(condition, body, update, env, state)
+  end
+
+  defp call(%Closure{} = closure, args, span, state) do
+    expected = length(closure.fun.params)
+    got = length(args)
+
+    if expected != got do
+      raise Error, kind: {:arity, expected, got}, span: span
+    end
+
+    {scope, state} =
+      closure.fun.params
+      |> Enum.zip(args)
+      |> Enum.reduce({Env.scope(closure.env), state}, fn {%Ident{name: name}, value}, {scope, state} ->
+        Env.declare(name, value, scope, state)
+      end)
+
+    case exec(closure.fun.body, scope, state) do
+      {:ok, _scope, state} -> {nil, state}
+      {{:return, value, _span}, _scope, state} -> {value, state}
+      {tag, _scope, _state} -> stray!(tag)
+    end
+  end
+
+  defp call(_callee, _args, span, _state) do
+    raise Error, kind: :not_callable, span: span
+  end
+
+  defp stray!({kind, span}) when kind in [:break, :continue] do
+    raise Error, kind: {:outside_loop, kind}, span: span
+  end
+
+  defp stray!({:return, _value, span}) do
+    raise Error, kind: :outside_function, span: span
   end
 end

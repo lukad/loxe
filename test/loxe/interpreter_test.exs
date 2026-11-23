@@ -3,7 +3,7 @@ defmodule Loxe.InterpreterTest do
 
   alias Loxe.Ast.{Binary, Grouping, Ident, Literal, Unary, VarDecl}
   alias Loxe.{Interpreter, Lexer, Parser, Span}
-  alias Loxe.Interpreter.{Error, State}
+  alias Loxe.Interpreter.{Closure, Error, State}
 
   doctest Loxe.Interpreter
 
@@ -48,8 +48,15 @@ defmodule Loxe.InterpreterTest do
     out
   end
 
-  defp run_error(src) do
-    {:error, %Error{} = error} = Interpreter.run(parse!(src))
+  defp run_error(src, out \\ nil) do
+    state =
+      if out do
+        %State{out: out}
+      else
+        %State{}
+      end
+
+    {:error, %Error{} = error} = Interpreter.run(parse!(src), state)
     error
   end
 
@@ -823,13 +830,295 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "span covers the statement" do
+      {:ok, io} = StringIO.open("")
       src = "print 1; { break; }"
-      assert run_error(src).span == %Span{source_id: 0, start: 11, end: 17}
+      assert run_error(src, io).span == %Span{source_id: 0, start: 11, end: 17}
     end
 
     test "messages" do
       assert Exception.message(run_error("break;")) == "break outside a loop at 0..6"
       assert Exception.message(run_error("continue;")) == "continue outside a loop at 0..9"
+    end
+  end
+
+  describe "functions" do
+    test "declaring and calling" do
+      assert output("fun f() { print 1; } f(); f();") == "1\n1\n"
+    end
+
+    test "declaring does not run the body" do
+      assert output("fun f() { print 1; } print 2;") == "2\n"
+    end
+
+    test "arguments are bound to the parameters in order" do
+      assert output("fun f(a, b) { print a; print b; } f(1, 2);") == "1\n2\n"
+    end
+
+    test "a call evaluates to the returned value" do
+      assert output("fun f() { return 1 + 2; } print f();") == "3\n"
+    end
+
+    test "a function without a return returns nil" do
+      assert output("fun f() {} print f();") == "nil\n"
+    end
+
+    test "a bare return returns nil" do
+      assert output("fun f() { return; } print f();") == "nil\n"
+    end
+
+    test "return stops the function" do
+      assert output("fun f() { print 1; return; print 2; } f(); print 3;") == "1\n3\n"
+    end
+
+    test "return from inside an if" do
+      src = "fun abs(n) { if (n < 0) return -n; return n; } print abs(-2); print abs(3);"
+      assert output(src) == "2\n3\n"
+    end
+
+    test "return from inside nested loops and blocks" do
+      src = """
+      fun f() {
+        for (var i = 0;; i = i + 1) {
+          while (true) { { if (i == 2) return i; } break; }
+        }
+      }
+      print f();
+      """
+
+      assert output(src) == "2\n"
+    end
+
+    test "arguments are evaluated left to right, after the callee" do
+      src = """
+      var log = "";
+      fun f(a, b) {}
+      fun g() { log = log + "c"; return f; }
+      g()(log = log + "a", log = log + "b");
+      print log;
+      """
+
+      assert output(src) == "cab\n"
+    end
+
+    test "functions are values" do
+      assert output("fun f() { return 1; } var g = f; print g();") == "1\n"
+
+      assert output("fun f(x) { return x + 1; } fun apply(g, x) { return g(x); } print apply(f, 1);") ==
+               "2\n"
+    end
+
+    test "functions are truthy" do
+      assert output("fun f() {} if (f) print 1;") == "1\n"
+    end
+
+    test "a function declared at the top level is a global" do
+      {:ok, state} = Interpreter.run(parse!("fun f() {}"))
+      assert %{"f" => %Closure{}} = state.globals
+    end
+
+    test "a function declared in a block is local to it" do
+      assert %Error{kind: {:undefined_variable, "f"}} = run_error("{ fun f() {} } f();")
+    end
+
+    test "parameters are local to the call" do
+      assert %Error{kind: {:undefined_variable, "a"}} = run_error("fun f(a) {} f(1); print a;")
+
+      {:ok, state} = Interpreter.run(parse!("fun f(a) { var b = a; } f(1);"))
+      assert Map.keys(state.globals) == ["f"]
+    end
+
+    test "a parameter shadows an outer variable" do
+      assert output("var a = 1; fun f(a) { a = 3; print a; } f(2); print a;") == "3\n1\n"
+    end
+
+    test "each call gets a fresh scope" do
+      assert output("fun f() { var x; print x; x = 1; } f(); f();") == "nil\nnil\n"
+    end
+
+    test "the body can assign globals" do
+      assert output("var a = 1; fun f() { a = 2; } f(); print a;") == "2\n"
+    end
+
+    test "recursion" do
+      src = """
+      fun fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }
+      print fib(10);
+      """
+
+      assert output(src) == "55\n"
+    end
+
+    test "recursion in a local function" do
+      src = "{ fun fact(n) { if (n <= 1) return 1; return n * fact(n - 1); } print fact(5); }"
+      assert output(src) == "120\n"
+    end
+
+    test "global functions can call functions declared after them" do
+      src = """
+      fun even(n) { if (n == 0) return true; return odd(n - 1); }
+      fun odd(n) { if (n == 0) return false; return even(n - 1); }
+      print even(4);
+      print odd(4);
+      """
+
+      assert output(src) == "true\nfalse\n"
+    end
+
+    test "local functions cannot call functions declared after them" do
+      assert %Error{kind: {:undefined_variable, "g"}} =
+               run_error("{ fun f() { g(); } fun g() {} f(); }")
+    end
+
+    test "many calls" do
+      src = "var n = 0; fun inc() { n = n + 1; } for (var i = 0; i < 10000; i = i + 1) inc(); print n;"
+      assert output(src) == "10000\n"
+    end
+  end
+
+  describe "closures" do
+    test "keep the variables of the scope they were declared in" do
+      src = """
+      fun make_counter() {
+        var i = 0;
+        fun count() { i = i + 1; return i; }
+        return count;
+      }
+      var a = make_counter();
+      var b = make_counter();
+      print a(); print a(); print b(); print a();
+      """
+
+      assert output(src) == "1\n2\n1\n3\n"
+    end
+
+    test "share variables with the enclosing scope" do
+      assert output("{ var a = 1; fun get() { return a; } a = 2; print get(); }") == "2\n"
+    end
+
+    test "share variables with each other" do
+      src = """
+      var get;
+      var set;
+      {
+        var a = 1;
+        fun g() { return a; }
+        fun s(v) { a = v; }
+        get = g;
+        set = s;
+      }
+      set(5);
+      print get();
+      """
+
+      assert output(src) == "5\n"
+    end
+
+    test "see the scope they were declared in, not the caller's" do
+      assert output(~s|var a = "global"; fun f() { print a; } { var a = "local"; f(); }|) ==
+               "global\n"
+    end
+
+    test "do not see variables declared after them in the same block" do
+      src = """
+      var a = "global";
+      {
+        fun show() { print a; }
+        show();
+        var a = "block";
+        show();
+      }
+      """
+
+      assert output(src) == "global\nglobal\n"
+    end
+  end
+
+  describe "call errors" do
+    test "calling something that is not a function" do
+      for callee <- ["nil", "true", "1", ~s("a")] do
+        assert %Error{kind: :not_callable} = run_error("#{callee}();"), callee
+      end
+    end
+
+    test "too few or too many arguments" do
+      assert %Error{kind: {:arity, 2, 1}} = run_error("fun f(a, b) {} f(1);")
+      assert %Error{kind: {:arity, 0, 2}} = run_error("fun f() {} f(1, 2);")
+    end
+
+    test "the arguments are evaluated before the arity check" do
+      assert %Error{kind: :division_by_zero} = run_error("fun f() {} f(1 / 0);")
+    end
+
+    test "the body does not run with the wrong number of arguments" do
+      {:ok, io} = StringIO.open("")
+      decls = parse!("fun f(a) { print 1; } f();")
+      assert {:error, %Error{kind: {:arity, 1, 0}}} = Interpreter.run(decls, %State{out: io})
+      assert StringIO.contents(io) == {"", ""}
+    end
+
+    test "an error in the body is returned" do
+      {:ok, io} = StringIO.open("")
+      decls = parse!(~s|fun f() { print 1; -"a"; print 2; } f(); print 3;|)
+
+      assert {:error, %Error{kind: {:invalid_operand, :neg}}} =
+               Interpreter.run(decls, %State{out: io})
+
+      assert StringIO.contents(io) == {"", "1\n"}
+    end
+
+    test "span covers the call" do
+      src = "fun f() {} print f(1, 2);"
+      assert run_error(src).span == %Span{source_id: 0, start: 17, end: 24}
+      assert run_error(~s|print "a"();|).span == %Span{source_id: 0, start: 6, end: 11}
+    end
+
+    test "messages" do
+      assert Exception.message(run_error(~s|"a"();|)) == "can only call functions at 0..5"
+
+      assert Exception.message(run_error("fun f(a) {} f();")) ==
+               "expected 1 argument but got 0 at 12..15"
+    end
+  end
+
+  describe "break, continue and return in functions" do
+    test "break and continue in a loop in a function" do
+      src = """
+      fun f() {
+        for (var i = 0; i < 4; i = i + 1) { if (i == 1) continue; if (i == 3) break; print i; }
+      }
+      f();
+      """
+
+      assert output(src) == "0\n2\n"
+    end
+
+    test "break and continue cannot reach the caller's loop" do
+      assert %Error{kind: {:outside_loop, :break}} =
+               run_error("fun f() { break; } while (true) { f(); }")
+
+      assert %Error{kind: {:outside_loop, :continue}} =
+               run_error("fun f() { continue; } for (var i = 0; i < 1; i = i + 1) f();")
+    end
+
+    test "return outside a function" do
+      assert %Error{kind: :outside_function} = run_error("return 1;")
+      assert %Error{kind: :outside_function} = run_error("{ return; }")
+      assert %Error{kind: :outside_function} = run_error("while (true) return;")
+    end
+
+    test "statements before a top-level return still run" do
+      {:ok, io} = StringIO.open("")
+      assert {:error, %Error{}} = Interpreter.run(parse!("print 1; return; print 2;"), %State{out: io})
+      assert StringIO.contents(io) == {"", "1\n"}
+    end
+
+    test "return span covers the statement" do
+      {:ok, io} = StringIO.open("")
+      assert run_error("print 1; return 2;", io).span == %Span{source_id: 0, start: 9, end: 18}
+    end
+
+    test "return message" do
+      assert Exception.message(run_error("return;")) == "return outside a function at 0..7"
     end
   end
 
