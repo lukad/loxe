@@ -2,7 +2,7 @@ defmodule Loxe.InterpreterTest do
   use ExUnit.Case, async: true
 
   alias Loxe.Ast.{Binary, Grouping, Ident, Literal, Unary, VarDecl}
-  alias Loxe.{Interpreter, Lexer, Parser, Span}
+  alias Loxe.{Interpreter, Lexer, Parser, Resolver, Span}
   alias Loxe.Interpreter.{Closure, Error, State}
 
   doctest Loxe.Interpreter
@@ -40,23 +40,28 @@ defmodule Loxe.InterpreterTest do
     decls
   end
 
-  # Runs `src` and returns what it printed.
+  # Runs `src` with `Loxe.run/3` and returns what it printed.
   defp output(src) do
     {:ok, io} = StringIO.open("")
-    {:ok, _state} = Interpreter.run(parse!(src), %State{out: io})
+    {:ok, _state} = Loxe.run(src, %State{out: io})
     {:ok, {"", out}} = StringIO.close(io)
     out
   end
 
-  defp run_error(src, out \\ nil) do
-    state =
-      if out do
-        %State{out: out}
-      else
-        %State{}
-      end
+  defp run_error(src, out \\ :stdio) do
+    {:error, %Error{} = error} = Loxe.run(src, %State{out: out})
+    error
+  end
 
-    {:error, %Error{} = error} = Interpreter.run(parse!(src), state)
+  # Runs `src` with `Interpreter.run/2` alone, without `Loxe.Resolver`,
+  # to test the interpreter's own checks.
+  defp unchecked_error(src, out \\ :stdio) do
+    {:error, %Error{} = error} = Interpreter.run(parse!(src), %State{out: out})
+    error
+  end
+
+  defp resolver_error(src) do
+    {:error, %Resolver.Error{} = error} = Loxe.run(src)
     error
   end
 
@@ -287,7 +292,7 @@ defmodule Loxe.InterpreterTest do
 
   describe "expressions from source" do
     defp run(src) do
-      {:ok, state} = Interpreter.run(parse!("var result = #{src};"))
+      {:ok, state} = Loxe.run("var result = #{src};")
       state.globals["result"]
     end
 
@@ -355,8 +360,8 @@ defmodule Loxe.InterpreterTest do
 
     test "nothing after an error runs" do
       {:ok, io} = StringIO.open("")
-      decls = parse!(~s(print 1; print -"a"; print 2;))
-      assert {:error, %Error{}} = Interpreter.run(decls, %State{out: io})
+      src = ~s(print 1; print -"a"; print 2;)
+      assert {:error, %Error{}} = Loxe.run(src, %State{out: io})
       assert StringIO.contents(io) == {"", "1\n"}
     end
   end
@@ -387,13 +392,13 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "globals are returned in the state" do
-      {:ok, state} = Interpreter.run(parse!(~s(var a = 1; var b = "x";)))
+      {:ok, state} = Loxe.run(~s(var a = 1; var b = "x";))
       assert state.globals == %{"a" => 1.0, "b" => "x"}
     end
 
     test "running with an earlier state keeps its globals" do
-      {:ok, state} = Interpreter.run(parse!("var a = 1;"))
-      {:ok, state} = Interpreter.run(parse!("a = a + 1;"), state)
+      {:ok, state} = Loxe.run("var a = 1;")
+      {:ok, state} = Loxe.run("a = a + 1;", state)
       assert state.globals["a"] == 2.0
     end
 
@@ -528,10 +533,10 @@ defmodule Loxe.InterpreterTest do
 
     test "an error in the body stops the loop" do
       {:ok, io} = StringIO.open("")
-      decls = parse!(~s|var i = 0; while (true) { print i; i = i + 1; if (i == 2) -"a"; }|)
+      src = ~s|var i = 0; while (true) { print i; i = i + 1; if (i == 2) -"a"; }|
 
       assert {:error, %Error{kind: {:invalid_operand, :neg}}} =
-               Interpreter.run(decls, %State{out: io})
+               Loxe.run(src, %State{out: io})
 
       assert StringIO.contents(io) == {"", "0\n1\n"}
     end
@@ -598,7 +603,7 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "the loop variable is not a global" do
-      {:ok, state} = Interpreter.run(parse!("for (var i = 0; i < 2; i = i + 1) {}"))
+      {:ok, state} = Loxe.run("for (var i = 0; i < 2; i = i + 1) {}")
       assert state.globals == %{}
     end
 
@@ -610,8 +615,9 @@ defmodule Loxe.InterpreterTest do
       assert output(src) == "0\n1\n10\n"
     end
 
-    test "the loop variable's initializer can read the shadowed variable" do
-      assert output("var i = 5; for (var i = i + 1; i < 8; i = i + 1) print i;") == "6\n7\n"
+    test "the loop variable's initializer cannot read the shadowed variable" do
+      assert %Resolver.Error{kind: {:own_initializer, "i"}} =
+               resolver_error("var i = 5; for (var i = i + 1; i < 8; i = i + 1) print i;")
     end
 
     test "an assignment initializer changes the outer variable" do
@@ -660,20 +666,20 @@ defmodule Loxe.InterpreterTest do
 
     test "an error in the update stops the loop" do
       {:ok, io} = StringIO.open("")
-      decls = parse!(~s|for (var i = 0; i < 5; i = i - "a") print i;|)
+      src = ~s|for (var i = 0; i < 5; i = i - "a") print i;|
 
       assert {:error, %Error{kind: {:invalid_operands, :sub}}} =
-               Interpreter.run(decls, %State{out: io})
+               Loxe.run(src, %State{out: io})
 
       assert StringIO.contents(io) == {"", "0\n"}
     end
 
     test "an error in the body stops the loop" do
       {:ok, io} = StringIO.open("")
-      decls = parse!(~s|for (var i = 0;; i = i + 1) { print i; if (i == 1) -"a"; }|)
+      src = ~s|for (var i = 0;; i = i + 1) { print i; if (i == 1) -"a"; }|
 
       assert {:error, %Error{kind: {:invalid_operand, :neg}}} =
-               Interpreter.run(decls, %State{out: io})
+               Loxe.run(src, %State{out: io})
 
       assert StringIO.contents(io) == {"", "0\n1\n"}
     end
@@ -708,7 +714,7 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "globals declared after the loop are still globals" do
-      {:ok, state} = Interpreter.run(parse!("for (var i = 0;;) { break; } var y = 2;"))
+      {:ok, state} = Loxe.run("for (var i = 0;;) { break; } var y = 2;")
       assert state.globals == %{"y" => 2.0}
     end
 
@@ -735,7 +741,7 @@ defmodule Loxe.InterpreterTest do
 
     test "break after the loop is an error" do
       assert %Error{kind: {:outside_loop, :break}} =
-               run_error("for (var i = 0; i < 1; i = i + 1) {} break;")
+               unchecked_error("for (var i = 0; i < 1; i = i + 1) {} break;")
     end
   end
 
@@ -778,7 +784,7 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "globals declared after the loop are still globals" do
-      {:ok, state} = Interpreter.run(parse!("while (true) { var x = 1; break; } var y = 2;"))
+      {:ok, state} = Loxe.run("while (true) { var x = 1; break; } var y = 2;")
       assert state.globals == %{"y" => 2.0}
     end
   end
@@ -813,19 +819,21 @@ defmodule Loxe.InterpreterTest do
     end
   end
 
+  # `Loxe.Resolver` would reject these programs before they run, so the
+  # tests skip it to check the interpreter's own errors.
   describe "break and continue outside a loop" do
     test "at the top level" do
-      assert %Error{kind: {:outside_loop, :break}} = run_error("break;")
-      assert %Error{kind: {:outside_loop, :continue}} = run_error("continue;")
+      assert %Error{kind: {:outside_loop, :break}} = unchecked_error("break;")
+      assert %Error{kind: {:outside_loop, :continue}} = unchecked_error("continue;")
     end
 
     test "in a block or if" do
-      assert %Error{kind: {:outside_loop, :break}} = run_error("{ { break; } }")
-      assert %Error{kind: {:outside_loop, :continue}} = run_error("if (true) continue;")
+      assert %Error{kind: {:outside_loop, :break}} = unchecked_error("{ { break; } }")
+      assert %Error{kind: {:outside_loop, :continue}} = unchecked_error("if (true) continue;")
     end
 
     test "after a loop" do
-      assert %Error{kind: {:outside_loop, :break}} = run_error("while (false) {} break;")
+      assert %Error{kind: {:outside_loop, :break}} = unchecked_error("while (false) {} break;")
     end
 
     test "statements before it still run" do
@@ -840,12 +848,12 @@ defmodule Loxe.InterpreterTest do
     test "span covers the statement" do
       {:ok, io} = StringIO.open("")
       src = "print 1; { break; }"
-      assert run_error(src, io).span == %Span{source_id: 0, start: 11, end: 17}
+      assert unchecked_error(src, io).span == %Span{source_id: 0, start: 11, end: 17}
     end
 
     test "messages" do
-      assert Exception.message(run_error("break;")) == "break outside a loop at 0..6"
-      assert Exception.message(run_error("continue;")) == "continue outside a loop at 0..9"
+      assert Exception.message(unchecked_error("break;")) == "break outside a loop at 0..6"
+      assert Exception.message(unchecked_error("continue;")) == "continue outside a loop at 0..9"
     end
   end
 
@@ -920,7 +928,7 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "a function declared at the top level is a global" do
-      {:ok, state} = Interpreter.run(parse!("fun f() {}"))
+      {:ok, state} = Loxe.run("fun f() {}")
       assert %{"f" => %Closure{}} = state.globals
     end
 
@@ -931,7 +939,7 @@ defmodule Loxe.InterpreterTest do
     test "parameters are local to the call" do
       assert %Error{kind: {:undefined_variable, "a"}} = run_error("fun f(a) {} f(1); print a;")
 
-      {:ok, state} = Interpreter.run(parse!("fun f(a) { var b = a; } f(1);"))
+      {:ok, state} = Loxe.run("fun f(a) { var b = a; } f(1);")
       assert Map.keys(state.globals) == ["f"]
     end
 
@@ -1059,17 +1067,17 @@ defmodule Loxe.InterpreterTest do
 
     test "the body does not run with the wrong number of arguments" do
       {:ok, io} = StringIO.open("")
-      decls = parse!("fun f(a) { print 1; } f();")
-      assert {:error, %Error{kind: {:arity, 1, 0}}} = Interpreter.run(decls, %State{out: io})
+      src = "fun f(a) { print 1; } f();"
+      assert {:error, %Error{kind: {:arity, 1, 0}}} = Loxe.run(src, %State{out: io})
       assert StringIO.contents(io) == {"", ""}
     end
 
     test "an error in the body is returned" do
       {:ok, io} = StringIO.open("")
-      decls = parse!(~s|fun f() { print 1; -"a"; print 2; } f(); print 3;|)
+      src = ~s|fun f() { print 1; -"a"; print 2; } f(); print 3;|
 
       assert {:error, %Error{kind: {:invalid_operand, :neg}}} =
-               Interpreter.run(decls, %State{out: io})
+               Loxe.run(src, %State{out: io})
 
       assert StringIO.contents(io) == {"", "1\n"}
     end
@@ -1100,18 +1108,20 @@ defmodule Loxe.InterpreterTest do
       assert output(src) == "0\n2\n"
     end
 
+    # The error tests below skip `Loxe.Resolver`, like the ones in
+    # "break and continue outside a loop".
     test "break and continue cannot reach the caller's loop" do
       assert %Error{kind: {:outside_loop, :break}} =
-               run_error("fun f() { break; } while (true) { f(); }")
+               unchecked_error("fun f() { break; } while (true) { f(); }")
 
       assert %Error{kind: {:outside_loop, :continue}} =
-               run_error("fun f() { continue; } for (var i = 0; i < 1; i = i + 1) f();")
+               unchecked_error("fun f() { continue; } for (var i = 0; i < 1; i = i + 1) f();")
     end
 
     test "return outside a function" do
-      assert %Error{kind: :outside_function} = run_error("return 1;")
-      assert %Error{kind: :outside_function} = run_error("{ return; }")
-      assert %Error{kind: :outside_function} = run_error("while (true) return;")
+      assert %Error{kind: :outside_function} = unchecked_error("return 1;")
+      assert %Error{kind: :outside_function} = unchecked_error("{ return; }")
+      assert %Error{kind: :outside_function} = unchecked_error("while (true) return;")
     end
 
     test "statements before a top-level return still run" do
@@ -1122,11 +1132,11 @@ defmodule Loxe.InterpreterTest do
 
     test "return span covers the statement" do
       {:ok, io} = StringIO.open("")
-      assert run_error("print 1; return 2;", io).span == %Span{source_id: 0, start: 9, end: 18}
+      assert unchecked_error("print 1; return 2;", io).span == %Span{source_id: 0, start: 9, end: 18}
     end
 
     test "return message" do
-      assert Exception.message(run_error("return;")) == "return outside a function at 0..7"
+      assert Exception.message(unchecked_error("return;")) == "return outside a function at 0..7"
     end
   end
 
@@ -1142,7 +1152,7 @@ defmodule Loxe.InterpreterTest do
 
     test "do nothing until called" do
       {:ok, io} = StringIO.open("")
-      assert {:ok, state} = Interpreter.run(parse!("fun () { print 1; };"), %State{out: io})
+      assert {:ok, state} = Loxe.run("fun () { print 1; };", %State{out: io})
       assert state.globals == %{}
       assert StringIO.contents(io) == {"", ""}
     end
@@ -1175,8 +1185,8 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "cannot refer to a local variable they initialize" do
-      assert %Error{kind: {:undefined_variable, "f"}} =
-               run_error("{ var f = fun () { return f; }; f(); }")
+      assert %Resolver.Error{kind: {:own_initializer, "f"}} =
+               resolver_error("{ var f = fun () { return f; }; f(); }")
     end
 
     test "wrong number of arguments" do
@@ -1185,7 +1195,7 @@ defmodule Loxe.InterpreterTest do
 
     test "break outside a loop in the body" do
       assert %Error{kind: {:outside_loop, :break}} =
-               run_error("while (true) { fun () { break; }(); }")
+               unchecked_error("while (true) { fun () { break; }(); }")
     end
 
     test "printing" do
@@ -1208,7 +1218,7 @@ defmodule Loxe.InterpreterTest do
     end
 
     test "locals are not added to the globals" do
-      {:ok, state} = Interpreter.run(parse!("{ var a = 1; }"))
+      {:ok, state} = Loxe.run("{ var a = 1; }")
       assert state.globals == %{}
     end
 
@@ -1238,12 +1248,14 @@ defmodule Loxe.InterpreterTest do
       assert output("{ var a = 1; { var a = 2; a = 3; } print a; }") == "1\n"
     end
 
-    test "an initializer can read the shadowed variable" do
-      assert output("var a = 1; { var a = a + 1; print a; } print a;") == "2\n1\n"
+    test "an initializer cannot read the shadowed variable" do
+      assert %Resolver.Error{kind: {:own_initializer, "a"}} =
+               resolver_error("var a = 1; { var a = a + 1; print a; }")
     end
 
-    test "locals can be redeclared in the same block" do
-      assert output("{ var a = 1; var a = 2; print a; }") == "2\n"
+    test "locals cannot be redeclared in the same block" do
+      assert %Resolver.Error{kind: {:already_declared, "a"}} =
+               resolver_error("{ var a = 1; var a = 2; print a; }")
     end
   end
 end

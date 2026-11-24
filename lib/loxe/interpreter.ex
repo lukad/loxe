@@ -30,6 +30,8 @@ defmodule Loxe.Interpreter do
   Variables declared at the top level are globals; variables declared in a
   block are visible until the end of the block and can shadow outer ones.
   Reading or assigning a variable that was never declared is an error.
+  `Loxe.Resolver` also rejects declaring a local twice in the same scope
+  and reading a local in its own initializer.
 
   Assignment is an expression that returns the assigned value, so
   `a = b = 1` sets both.
@@ -79,8 +81,7 @@ defmodule Loxe.Interpreter do
   function without declaring a name, and otherwise works like a declared
   one. It can only call itself through a variable that holds it. That
   works for a global, as in `var f = fun () { f(); };`, but not for a
-  local, because the function captures its scope before the variable is
-  declared.
+  local: `Loxe.Resolver` rejects reading a local in its own initializer.
 
   ## Output
 
@@ -133,6 +134,12 @@ defmodule Loxe.Interpreter do
   Stops at the first error and returns `{:error, error}` with a
   `Loxe.Interpreter.Error`. Changes to the state made before the error are
   lost, but anything already printed stays printed.
+
+  `run/2` doesn't check the rules in `Loxe.Resolver`. `Loxe.run/3` checks
+  them before calling it. Without that check, `break`, `continue` and `return`
+  in the wrong place are still runtime errors, but redeclaring a local
+  replaces the earlier one, and an initializer can read the variable it
+  shadows.
 
   ## Examples
 

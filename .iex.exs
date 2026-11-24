@@ -1,1 +1,3 @@
-import Loxe.IEx.Helpers, warn: false
+import Loxe, warn: false
+
+alias Loxe.{Ast, Interpreter, Lexer, Parser, Resolver}, warn: false
