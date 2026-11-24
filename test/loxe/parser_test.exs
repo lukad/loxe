@@ -171,6 +171,24 @@ defmodule Loxe.ParserTest do
       assert sexp("-f()") == "(neg (call f))"
       assert sexp("-a.b") == "(neg (get a b))"
     end
+
+    test "unary not" do
+      assert sexp("!a") == "(not a)"
+      assert sexp("!!a") == "(not (not a))"
+      assert sexp("!-a") == "(not (neg a))"
+      assert sexp("-!a") == "(neg (not a))"
+    end
+
+    test "unary not binds tighter than binary operators" do
+      assert sexp("!a == b") == "(eq (not a) b)"
+      assert sexp("!a and b") == "(and (not a) b)"
+      assert sexp("a or !b") == "(or a (not b))"
+    end
+
+    test "unary not binds looser than calls and property access" do
+      assert sexp("!f()") == "(not (call f))"
+      assert sexp("!a.b") == "(not (get a b))"
+    end
   end
 
   describe "calls and property access" do
@@ -260,7 +278,7 @@ defmodule Loxe.ParserTest do
     end
 
     test "invalid targets" do
-      for src <- ["1 = 2;", "a + b = c;", "f() = 1;", "-a = 1;", "(a) = 1;", "(a.b) = 1;"] do
+      for src <- ["1 = 2;", "a + b = c;", "f() = 1;", "-a = 1;", "!a = 1;", "(a) = 1;", "(a.b) = 1;"] do
         assert %Error{kind: :invalid_assign_target} = error(src), src
       end
     end
@@ -417,9 +435,11 @@ defmodule Loxe.ParserTest do
     end
 
     test "unary span" do
-      src = "-a;"
-      assert [%ExprStmt{expr: %Unary{span: span}}] = parse!(src)
-      assert span == span(src, "-a")
+      for op <- ["-", "!"] do
+        src = "#{op}a;"
+        assert [%ExprStmt{expr: %Unary{span: span}}] = parse!(src)
+        assert span == span(src, "#{op}a")
+      end
     end
 
     test "property access and set spans" do

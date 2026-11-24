@@ -36,7 +36,7 @@ defmodule Loxe.Parser do
   | `<` `<=` `>` `>=` | left          |
   | `+` `-`           | left          |
   | `*` `/`           | left          |
-  | unary `-`         | prefix        |
+  | unary `-` `!`     | prefix        |
   | calls, `.`        | left          |
 
   The target of `=` must be a variable or a property access. `a = 1`
@@ -366,9 +366,11 @@ defmodule Loxe.Parser do
     end
   end
 
-  defp nud([{:minus, _, start} | rest]) do
+  defp nud([{kind, _, start} | rest]) when kind in [:minus, :bang] do
+    op = if kind == :minus, do: :neg, else: :not
+
     with {:ok, operand, rest} <- expr_bp(rest, 80) do
-      {:ok, %Unary{op: :neg, expr: operand, span: Span.join(start, operand.span)}, rest}
+      {:ok, %Unary{op: op, expr: operand, span: Span.join(start, operand.span)}, rest}
     end
   end
 

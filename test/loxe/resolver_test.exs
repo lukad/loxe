@@ -32,7 +32,7 @@ defmodule Loxe.ResolverTest do
       var g = 1;
       fun f(a, b) {
         var c = -(a + b) * 2;
-        c = f(c, fun (d) { return -d; });
+        c = f(c, fun (d) { return !d; });
         if (c == nil or false) print c; else print "x";
         while (c) { c = nil; break; }
         for (var i = 0; i < 2; i = i + 1) { continue; }

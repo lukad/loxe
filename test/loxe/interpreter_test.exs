@@ -302,6 +302,14 @@ defmodule Loxe.InterpreterTest do
       assert run(~s("a" + "b" + "c")) == "abc"
     end
 
+    test "not" do
+      assert run("!true") == false
+      assert run("!nil") == true
+      assert run("!!0") == true
+      assert run("!(1 == 2)") == true
+      assert run("!1 == false") == true
+    end
+
     test "comparison" do
       assert run("1 < 2") == true
       assert run("2 <= 2") == true
